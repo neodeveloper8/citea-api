@@ -1,0 +1,3 @@
+# ruff.toml
+[lint.per-file-ignores]
+"config/settings/*.py" = ["F403", "F405"]

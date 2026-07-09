@@ -68,3 +68,22 @@ class BusinessDetailSerializer(serializers.ModelSerializer):
             "hours",
             "images",
         ]
+
+
+class BusinessWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Business
+        fields = [
+            "id",
+            "slug",
+            "name",
+            "category",
+            "description",
+            "address",
+            "phone",
+            "whatsapp",
+            "email",
+            "latitude",
+            "longitude",
+        ]
+        read_only_fields = ["id", "slug"]

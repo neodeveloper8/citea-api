@@ -1,15 +1,21 @@
+from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.db.models.deletion import ProtectedError
+from drf_spectacular.utils import extend_schema
 from rest_framework import mixins, viewsets
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 
 from core.exceptions import ServiceHasBookings
 from users.permissions import IsDueno, IsOwnerOrReadOnly
 
 from .filters import BusinessFilter, ServiceFilter
-from .models import Business, BusinessImage, Category, Service
+from .models import Business, BusinessHours, BusinessImage, Category, Service
 from .serializers import (
     BusinessDetailSerializer,
+    BusinessHoursSerializer,
+    BusinessHoursWriteSerializer,
     BusinessListSerializer,
     BusinessWriteSerializer,
     CategorySerializer,
@@ -43,7 +49,7 @@ class BusinessViewSet(
     def get_permissions(self):
         if self.action == "create":
             return [IsAuthenticated(), IsDueno()]
-        if self.action in ("update", "partial_update"):
+        if self.action in ("update", "partial_update", "hours"):
             return [IsAuthenticated(), IsDueno(), IsOwnerOrReadOnly()]
         return [AllowAny()]
 
@@ -59,7 +65,7 @@ class BusinessViewSet(
         user = self.request.user
 
         # Escritura: solo los negocios del usuario (404 si no es suyo).
-        if self.action in ("update", "partial_update"):
+        if self.action in ("update", "partial_update", "hours"):
             return qs.filter(owner=user)
 
         # Detalle: los aprobados + los propios (para que el dueño vea su draft).
@@ -86,6 +92,33 @@ class BusinessViewSet(
         # El owner NUNCA viene del cliente: lo pone el backend.
         # status usa el default del modelo (draft).
         serializer.save(owner=self.request.user)
+
+    @extend_schema(
+        request=BusinessHoursWriteSerializer(many=True),
+        responses=BusinessHoursSerializer(many=True),
+    )
+    @action(detail=True, methods=["put"], url_path="hours")
+    def hours(self, request, slug=None):
+        # get_object() hace DOS cosas: busca en get_queryset() (404 si no es tuyo)
+        # y dispara check_object_permissions() -> IsOwnerOrReadOnly. Dos candados.
+        business = self.get_object()
+
+        serializer = BusinessHoursWriteSerializer(data=request.data, many=True)
+        serializer.is_valid(raise_exception=True)
+
+        # Reemplazo total: borrar y recrear. ATÓMICO es obligatorio: entre el
+        # delete y el create hay un instante sin horarios; si el create falla,
+        # sin transacción le borrás el horario al dueño y no hay vuelta atrás.
+        with transaction.atomic():
+            business.hours.all().delete()
+            BusinessHours.objects.bulk_create(
+                [
+                    BusinessHours(business=business, **item)
+                    for item in serializer.validated_data
+                ]
+            )
+
+        return Response(BusinessHoursSerializer(business.hours.all(), many=True).data)
 
 
 class ServiceViewSet(viewsets.ModelViewSet):

@@ -96,6 +96,44 @@ class ServiceWriteSerializer(serializers.ModelSerializer):
         return value
 
 
+class BusinessHoursListSerializer(serializers.ListSerializer):
+    def validate(self, attrs):
+        # attrs es la LISTA completa. Acá validamos ENTRE elementos: el
+        # CheckConstraint del modelo solo garantiza close>open por fila, pero
+        # nada impide mandar 09:00-13:00 y 11:00-15:00 el mismo día (se pisan).
+        from collections import defaultdict
+
+        por_dia = defaultdict(list)
+        for item in attrs:
+            por_dia[item["weekday"]].append(item)
+
+        for weekday, franjas in por_dia.items():
+            franjas.sort(key=lambda f: f["open_time"])
+            for previa, actual in zip(franjas, franjas[1:]):
+                if actual["open_time"] < previa["close_time"]:
+                    raise serializers.ValidationError(
+                        f"Hay franjas horarias que se solapan en el día {weekday}."
+                    )
+        return attrs
+
+
+class BusinessHoursWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BusinessHours
+        fields = ["weekday", "open_time", "close_time"]
+        list_serializer_class = BusinessHoursListSerializer
+
+    def validate(self, attrs):
+        # Réplica del CheckConstraint: el clean() del modelo NO corre vía DRF,
+        # y bulk_create tampoco lo llama. Sin esto, el error saldría como
+        # IntegrityError (500) en vez de un 400 legible.
+        if attrs["close_time"] <= attrs["open_time"]:
+            raise serializers.ValidationError(
+                "La hora de cierre debe ser posterior a la de apertura."
+            )
+        return attrs
+
+
 class BusinessWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business

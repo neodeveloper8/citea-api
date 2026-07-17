@@ -70,6 +70,32 @@ class BusinessDetailSerializer(serializers.ModelSerializer):
         ]
 
 
+class ServiceWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = [
+            "id",
+            "business",
+            "name",
+            "description",
+            "duration_minutes",
+            "price",
+            "is_active",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_business(self, value):
+        # CRÍTICO: 'business' es escribible (el dueño elige cuál de SUS negocios).
+        # IsOwnerOrReadOnly NO cubre esto: en un POST no hay objeto todavía,
+        # así que has_object_permission nunca corre. Sin esta validación, un dueño
+        # podría crear servicios dentro del negocio de otro.
+        if value.owner != self.context["request"].user:
+            raise serializers.ValidationError(
+                "No podés crear servicios en un negocio que no es tuyo."
+            )
+        return value
+
+
 class BusinessWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business

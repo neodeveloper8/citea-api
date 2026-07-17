@@ -1,5 +1,15 @@
 from rest_framework.views import exception_handler as drf_exception_handler
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import APIException, ValidationError
+from rest_framework import status
+
+
+class ServiceHasBookings(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = (
+        "Este servicio tiene reservas asociadas y no se puede borrar. "
+        "Desactivalo (is_active=False) para ocultarlo del público."
+    )
+    default_code = "service_has_bookings"
 
 
 def custom_exception_handler(exc, context):

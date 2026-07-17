@@ -1,16 +1,19 @@
 from django.db.models import Prefetch, Q
+from django.db.models.deletion import ProtectedError
 from rest_framework import mixins, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 
+from core.exceptions import ServiceHasBookings
 from users.permissions import IsDueno, IsOwnerOrReadOnly
 
-from .filters import BusinessFilter
+from .filters import BusinessFilter, ServiceFilter
 from .models import Business, BusinessImage, Category, Service
 from .serializers import (
     BusinessDetailSerializer,
     BusinessListSerializer,
     BusinessWriteSerializer,
     CategorySerializer,
+    ServiceWriteSerializer,
 )
 
 
@@ -83,3 +86,34 @@ class BusinessViewSet(
         # El owner NUNCA viene del cliente: lo pone el backend.
         # status usa el default del modelo (draft).
         serializer.save(owner=self.request.user)
+
+
+class ServiceViewSet(viewsets.ModelViewSet):
+    # Endpoint exclusivo del dueño: el público ya recibe los servicios
+    # anidados en GET /api/businesses/<slug>/. Por eso NO hay get_permissions()
+    # ramificado ni queryset público.
+    serializer_class = ServiceWriteSerializer
+    permission_classes = [IsAuthenticated, IsDueno, IsOwnerOrReadOnly]
+    owner_field = "business.owner"  # lo lee IsOwnerOrReadOnly
+    filterset_class = ServiceFilter
+    search_fields = ["name"]
+
+    def get_queryset(self):
+        user = self.request.user
+        # Guard: spectacular puede introspeccionar la view con un user anónimo
+        # al generar el schema; sin esto, filter(business__owner=AnonymousUser) explota.
+        if not user.is_authenticated:
+            return Service.objects.none()
+        # select_related HASTA owner (no solo business): IsOwnerOrReadOnly recorre
+        # service.business.owner, y sin esto son 2 queries extra POR objeto.
+        return Service.objects.filter(business__owner=user).select_related(
+            "business__owner"
+        )
+
+    def perform_destroy(self, instance):
+        # Pedir perdón, no permiso: el PROTECT lo garantiza la BD, no Python.
+        # Un chequeo previo con .exists() tendría una ventana TOCTOU.
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ServiceHasBookings()

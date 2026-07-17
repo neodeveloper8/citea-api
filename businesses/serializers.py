@@ -134,6 +134,47 @@ class BusinessHoursWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class BusinessImageWriteSerializer(serializers.ModelSerializer):
+    # 'image' NO es un campo del modelo: es un canal de ENTRADA puro.
+    # Entra el archivo -> se sube a Cloudinary -> de la respuesta salen
+    # public_id e image_url, que sí se persisten. write_only: nunca sale.
+    image = serializers.ImageField(write_only=True)
+
+    class Meta:
+        model = BusinessImage
+        fields = [
+            "id",
+            "business",
+            "image",
+            "public_id",
+            "image_url",
+            "alt_text",
+            "is_cover",
+            "order",
+        ]
+        # public_id/image_url read_only: si el cliente pudiera mandarlos,
+        # apuntaría los registros a cualquier URL de internet.
+        read_only_fields = ["id", "public_id", "image_url"]
+
+    def validate_business(self, value):
+        # Mismo hueco que en Services: IsOwnerOrReadOnly no cubre el POST
+        # (no hay objeto todavía, has_object_permission nunca corre).
+        if value.owner != self.context["request"].user:
+            raise serializers.ValidationError(
+                "No podés subir imágenes a un negocio que no es tuyo."
+            )
+        return value
+
+
+class BusinessImageUpdateSerializer(serializers.ModelSerializer):
+    # El archivo NO se reemplaza en un PATCH: para cambiar la foto,
+    # se borra y se sube otra. Evita huérfanos y URLs rotas.
+    class Meta:
+        model = BusinessImage
+        fields = ["id", "public_id", "image_url", "alt_text", "is_cover", "order"]
+        read_only_fields = ["id", "public_id", "image_url"]
+
+
 class BusinessWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business

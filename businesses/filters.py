@@ -1,6 +1,6 @@
 import django_filters
 
-from .models import Business, Service
+from .models import Business, BusinessImage, Service
 
 
 class BusinessFilter(django_filters.FilterSet):
@@ -17,3 +17,11 @@ class ServiceFilter(django_filters.FilterSet):
     class Meta:
         model = Service
         fields = ["business", "is_active"]
+
+
+class BusinessImageFilter(django_filters.FilterSet):
+    business = django_filters.CharFilter(field_name="business__slug")
+
+    class Meta:
+        model = BusinessImage
+        fields = ["business", "is_cover"]

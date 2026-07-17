@@ -11,6 +11,7 @@ identify==2.6.19
 iniconfig==2.3.0
 nodeenv==1.10.0
 packaging==26.2
+Pillow==12.3.0
 platformdirs==4.10.0
 pluggy==1.6.0
 pre_commit==4.6.0

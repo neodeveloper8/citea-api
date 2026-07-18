@@ -141,6 +141,23 @@ class BusinessHours(TimeStampedModel):
                 "La hora de cierre debe ser posterior a la de apertura."
             )
 
+        for field_name, value in (
+            ("open_time", self.open_time),
+            ("close_time", self.close_time),
+        ):
+            if value is None:
+                continue
+            if value.second != 0 or value.microsecond != 0:
+                raise ValidationError(
+                    f"{value.strftime('%H:%M:%S')} no es válido: los horarios "
+                    "deben ser múltiplos de 15 minutos, sin segundos."
+                )
+            if value.minute not in (0, 15, 30, 45):
+                raise ValidationError(
+                    f"{value.strftime('%H:%M:%S')} no es válido: los horarios "
+                    "deben ser múltiplos de 15 minutos, sin segundos."
+                )
+
 
 class Service(TimeStampedModel):
     business = models.ForeignKey(

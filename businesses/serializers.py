@@ -192,3 +192,9 @@ class BusinessWriteSerializer(serializers.ModelSerializer):
             "longitude",
         ]
         read_only_fields = ["id", "slug"]
+
+
+class SlotSerializer(serializers.Serializer):
+    inicio = serializers.DateTimeField()
+    fin = serializers.DateTimeField()
+    disponible = serializers.BooleanField()

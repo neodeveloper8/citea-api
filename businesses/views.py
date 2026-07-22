@@ -1,16 +1,22 @@
 import logging
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import cloudinary.uploader
 from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.db.models.deletion import ProtectedError
-from drf_spectacular.utils import extend_schema
+from django.utils import timezone
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
+from bookings.availability import calcular_slots
+from bookings.models import Booking
 from core.exceptions import ServiceHasBookings
 from users.permissions import IsDueno, IsOwnerOrReadOnly
 
@@ -26,9 +32,12 @@ from .serializers import (
     BusinessWriteSerializer,
     CategorySerializer,
     ServiceWriteSerializer,
+    SlotSerializer,
 )
 
 logger = logging.getLogger(__name__)
+
+LIMA_TZ = ZoneInfo("America/Lima")
 
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
@@ -59,6 +68,9 @@ class BusinessViewSet(
             return [IsAuthenticated(), IsDueno()]
         if self.action in ("update", "partial_update", "hours"):
             return [IsAuthenticated(), IsDueno(), IsOwnerOrReadOnly()]
+        # availability es público. Explícito por patrón, aunque coincida con el default.
+        if self.action == "availability":
+            return [AllowAny()]
         return [AllowAny()]
 
     def get_serializer_class(self):
@@ -75,6 +87,12 @@ class BusinessViewSet(
         # Escritura: solo los negocios del usuario (404 si no es suyo).
         if self.action in ("update", "partial_update", "hours"):
             return qs.filter(owner=user)
+
+        if self.action == "availability":
+            visible = Q(status=Business.Status.APPROVED)
+            if user.is_authenticated:
+                visible |= Q(owner=user)
+            return qs.filter(visible)
 
         # Detalle: los aprobados + los propios (para que el dueño vea su draft).
         if self.action == "retrieve":
@@ -127,6 +145,82 @@ class BusinessViewSet(
             )
 
         return Response(BusinessHoursSerializer(business.hours.all(), many=True).data)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("date", str, description="YYYY-MM-DD", required=True),
+            OpenApiParameter(
+                "service", int, description="ID del servicio", required=True
+            ),
+        ],
+        responses=SlotSerializer(many=True),
+    )
+    @action(detail=True, methods=["get"], url_path="availability")
+    def availability(self, request, slug=None):
+        business = self.get_object()  # 404 si slug no existe / no visible
+
+        date_str = request.query_params.get("date")
+        service_id = request.query_params.get("service")
+
+        if not date_str:
+            raise ValidationError({"date": "Este parámetro es requerido."})
+        if not service_id:
+            raise ValidationError({"service": "Este parámetro es requerido."})
+
+        try:
+            fecha = date.fromisoformat(date_str)
+        except ValueError:
+            raise ValidationError({"date": "Formato inválido, se espera YYYY-MM-DD."})
+
+        try:
+            service_id_int = int(service_id)
+        except (ValueError, TypeError):
+            raise ValidationError({"service": "Debe ser un id numérico."})
+
+        # 404 (no 400) si el servicio no existe O es de otro negocio: no filtramos
+        # información sobre servicios ajenos.
+        try:
+            service = Service.objects.get(
+                id=service_id_int, business=business, is_active=True
+            )
+        except Service.DoesNotExist:
+            raise NotFound("Servicio no encontrado.")
+
+        tramos = [
+            (h.open_time, h.close_time)
+            for h in business.hours.filter(weekday=fecha.weekday()).order_by(
+                "open_time"
+            )
+        ]
+
+        inicio_dia = timezone.make_aware(datetime.combine(fecha, time.min), LIMA_TZ)
+        fin_dia = inicio_dia + timedelta(days=1)
+        reservas = [
+            (b.start_datetime.astimezone(LIMA_TZ), b.end_datetime.astimezone(LIMA_TZ))
+            for b in Booking.objects.filter(
+                business=business,
+                status__in=[Booking.Status.PENDING, Booking.Status.CONFIRMED],
+                start_datetime__lt=fin_dia,
+                end_datetime__gt=inicio_dia,
+            )
+        ]
+
+        slots = calcular_slots(
+            tramos_del_dia=tramos,
+            reservas_del_dia=reservas,
+            duracion_servicio=service.duration_minutes,
+            fecha=fecha,
+            ahora=timezone.now(),
+            paso=15,
+        )
+
+        return Response(
+            {
+                "date": date_str,
+                "service": service_id_int,
+                "slots": SlotSerializer(slots, many=True).data,
+            }
+        )
 
 
 class ServiceViewSet(viewsets.ModelViewSet):

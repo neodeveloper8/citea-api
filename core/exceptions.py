@@ -12,6 +12,15 @@ class ServiceHasBookings(APIException):
     default_code = "service_has_bookings"
 
 
+class SlotJustTaken(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = (
+        "Ese horario acaba de ser reservado por otra persona. "
+        "Actualizá la disponibilidad e intentá de nuevo."
+    )
+    default_code = "slot_just_taken"
+
+
 def custom_exception_handler(exc, context):
     # 1. Dejamos que DRF maneje la excepción primero. Nos devuelve un Response
     #    con el status code correcto (400, 401, 403, 404...) y el cuerpo en SU formato.

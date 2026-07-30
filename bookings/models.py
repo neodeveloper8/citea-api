@@ -1,11 +1,23 @@
 # Create your models here.
 # bookings/models.py
 from django.conf import settings
+from django.contrib.postgres.constraints import ExclusionConstraint
+from django.contrib.postgres.fields import (
+    DateTimeRangeField,
+    RangeBoundary,
+    RangeOperators,
+)
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Func, Q
 
 from core.models import TimeStampedModel
 from businesses.models import Business, Service
+
+
+class TsTzRange(Func):
+    function = "TSTZRANGE"
+    output_field = DateTimeRangeField()
 
 
 class Booking(TimeStampedModel):
@@ -69,6 +81,17 @@ class Booking(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(end_datetime__gt=models.F("start_datetime")),
                 name="booking_end_after_start",
+            ),
+            ExclusionConstraint(
+                name="excluir_reservas_solapadas",
+                expressions=(
+                    (
+                        TsTzRange("start_datetime", "end_datetime", RangeBoundary()),
+                        RangeOperators.OVERLAPS,
+                    ),
+                    ("business", RangeOperators.EQUAL),
+                ),
+                condition=Q(status__in=["pending", "confirmed"]),
             ),
         ]
 

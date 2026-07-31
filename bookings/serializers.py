@@ -7,6 +7,7 @@ from rest_framework import serializers
 from businesses.models import Business, Service
 from bookings.availability import calcular_slots
 from bookings.models import Booking
+from users.models import User
 
 LIMA_TZ = ZoneInfo("America/Lima")
 
@@ -131,3 +132,45 @@ class BookingCreateSerializer(serializers.ModelSerializer):
                 business=business
             ).exists(),
         )
+
+
+class BookingBusinessSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Business
+        fields = ["slug", "name"]
+
+
+class BookingServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Service
+        fields = ["id", "name", "duration_minutes"]
+
+
+class BookingCustomerSerializer(serializers.ModelSerializer):
+    # El User custom del proyecto no tiene first_name/last_name/name: solo
+    # email y phone identifican a la persona (ver users/models.py).
+    class Meta:
+        model = User
+        fields = ["id", "email", "phone"]
+
+
+class BookingReadSerializer(serializers.ModelSerializer):
+    business = BookingBusinessSerializer(read_only=True)
+    service = BookingServiceSerializer(read_only=True)
+    customer = BookingCustomerSerializer(read_only=True)
+
+    class Meta:
+        model = Booking
+        fields = [
+            "id",
+            "start_datetime",
+            "end_datetime",
+            "status",
+            "price_at_booking",
+            "duration_at_booking",
+            "customer_note",
+            "business",
+            "service",
+            "customer",
+        ]
+        read_only_fields = fields

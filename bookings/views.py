@@ -4,15 +4,16 @@ from django.db import IntegrityError, transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from businesses.models import Business
-from core.exceptions import SlotJustTaken
+from core.exceptions import SlotJustTaken, TransicionNoPermitida
 from users.permissions import IsDueno
+from .exceptions import TransicionInvalida
 from .filters import BookingFilter
 from .models import Booking
 from .serializers import BookingCreateSerializer, BookingReadSerializer
@@ -86,3 +87,29 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
             if "excluir_reservas_solapadas" in str(exc):
                 raise SlotJustTaken()
             raise
+
+    def _transicionar_como_dueno(self, request, pk, *, metodo):
+        """Transición solo-dueño, atómica y con la fila bloqueada.
+        Candados: IsDueno (rol, 403) + filtro business__owner (ajena -> 404)."""
+        with transaction.atomic():
+            booking = get_object_or_404(
+                Booking.objects.select_for_update(of=("self",)).filter(
+                    business__owner=request.user
+                ),
+                pk=pk,
+            )
+            try:
+                getattr(booking, metodo)()
+            except TransicionInvalida as exc:
+                raise TransicionNoPermitida(detail=str(exc))
+        serializer = BookingReadSerializer(booking, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="confirm",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def confirm(self, request, pk=None):
+        return self._transicionar_como_dueno(request, pk, metodo="confirmar")

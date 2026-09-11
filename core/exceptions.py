@@ -21,6 +21,14 @@ class SlotJustTaken(APIException):
     default_code = "slot_just_taken"
 
 
+class TransicionNoPermitida(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = (
+        "La transición solicitada no es válida para el estado actual de la reserva."
+    )
+    default_code = "transicion_no_permitida"
+
+
 def custom_exception_handler(exc, context):
     # 1. Dejamos que DRF maneje la excepción primero. Nos devuelve un Response
     #    con el status code correcto (400, 401, 403, 404...) y el cuerpo en SU formato.

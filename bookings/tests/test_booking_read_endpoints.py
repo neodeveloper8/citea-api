@@ -251,6 +251,20 @@ def test_business_incluye_contacto_del_cliente(api_client, escenario):
     assert customer_a1["phone"] == escenario["cliente_a"].phone
 
 
+def test_business_incluye_full_name_del_cliente(api_client, escenario):
+    cliente_a = escenario["cliente_a"]
+    cliente_a.full_name = "Cliente Nombre"
+    cliente_a.save()
+
+    api_client.force_authenticate(user=escenario["dueno_a"])
+    response = api_client.get(_business_url(escenario["business"]))
+
+    assert response.status_code == 200
+    por_id = {b["id"]: b for b in response.json()["results"]}
+    customer_a1 = por_id[escenario["a1"].id]["customer"]
+    assert customer_a1["full_name"] == "Cliente Nombre"
+
+
 def test_business_otro_dueno_da_404(api_client, escenario):
     api_client.force_authenticate(user=escenario["dueno_b"])
     response = api_client.get(_business_url(escenario["business"]))

@@ -83,12 +83,15 @@ class TestRegister:
                 "email": "nuevo@test.pe",
                 "password": "ClaveSegura123",
                 "phone": "987654321",
+                "full_name": "Juan Pérez",
             },
             format="json",
         )
         assert response.status_code == status.HTTP_201_CREATED
         assert "tokens" in response.data
         assert response.data["user"]["email"] == "nuevo@test.pe"
+        user = User.objects.get(email="nuevo@test.pe")
+        assert user.full_name == "Juan Pérez"
 
     def test_register_cannot_set_role(self, api_client):
         """🔑 SEGURIDAD: un usuario NO puede auto-asignarse un rol.
@@ -98,6 +101,7 @@ class TestRegister:
             {
                 "email": "hacker@test.pe",
                 "password": "ClaveSegura123",
+                "full_name": "Ana Torres",
                 "role": "platform_admin",  # intento de escalación
             },
             format="json",
@@ -113,6 +117,7 @@ class TestRegister:
             {
                 "email": "debil@test.pe",
                 "password": "123",
+                "full_name": "Test User",
             },
             format="json",
         )
@@ -127,10 +132,38 @@ class TestRegister:
             {
                 "email": "cliente@test.pe",  # ya existe (viene de la fixture)
                 "password": "ClaveSegura123",
+                "full_name": "Test User",
             },
             format="json",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_register_sin_full_name_rechazado(self, api_client):
+        """full_name es obligatorio: sin mandarlo, 400 con el campo en el error."""
+        response = api_client.post(
+            reverse("register"),
+            {
+                "email": "sinnombre@test.pe",
+                "password": "ClaveSegura123",
+            },
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "full_name" in response.data["details"]
+
+    def test_register_full_name_solo_espacios_rechazado(self, api_client):
+        """trim_whitespace colapsa "  " a "" -> cae por required/min_length."""
+        response = api_client.post(
+            reverse("register"),
+            {
+                "email": "espacios@test.pe",
+                "password": "ClaveSegura123",
+                "full_name": "   ",
+            },
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "full_name" in response.data["details"]
 
 
 # ---------- Tests de login ----------

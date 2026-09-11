@@ -147,11 +147,11 @@ class BookingServiceSerializer(serializers.ModelSerializer):
 
 
 class BookingCustomerSerializer(serializers.ModelSerializer):
-    # El User custom del proyecto no tiene first_name/last_name/name: solo
-    # email y phone identifican a la persona (ver users/models.py).
+    # Todos los campos son de solo lectura: este serializer nunca escribe al
+    # User, solo lo expone dentro de una reserva (ver users/models.py).
     class Meta:
         model = User
-        fields = ["id", "email", "phone"]
+        fields = ["id", "email", "phone", "full_name"]
 
 
 class BookingReadSerializer(serializers.ModelSerializer):

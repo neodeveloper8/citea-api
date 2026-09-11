@@ -19,10 +19,19 @@ class RegisterSerializer(serializers.ModelSerializer):
             "input_type": "password"
         },  # cosmético: oculta el campo en la API navegable de DRF
     )
+    # required=True + min_length: full_name es obligatorio en el registro.
+    # trim_whitespace=True colapsa "   " a "" antes de validar, así un nombre
+    # de puros espacios cae por required/min_length en vez de colarse.
+    full_name = serializers.CharField(
+        required=True,
+        min_length=2,
+        max_length=150,
+        trim_whitespace=True,
+    )
 
     class Meta:
         model = User
-        fields = ("id", "email", "password", "phone")
+        fields = ("id", "email", "password", "phone", "full_name")
         # role NO está en fields a propósito: un usuario que se registra NUNCA
         # debe poder elegir su rol (si no, cualquiera se haría platform_admin).
         # El rol lo asigna el sistema -> default "cliente" del modelo/manager.

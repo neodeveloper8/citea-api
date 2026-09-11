@@ -138,3 +138,21 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
                 raise TransicionNoPermitida(detail=str(exc))
         serializer = BookingReadSerializer(booking, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="complete",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def complete(self, request, pk=None):
+        return self._transicionar_como_dueno(request, pk, metodo="completar")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="no-show",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def no_show(self, request, pk=None):
+        return self._transicionar_como_dueno(request, pk, metodo="marcar_no_show")

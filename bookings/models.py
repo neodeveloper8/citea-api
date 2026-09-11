@@ -112,6 +112,44 @@ class Booking(TimeStampedModel):
         ):
             raise ValidationError("El servicio no pertenece al negocio de la reserva.")
 
+    def _transicionar(self, *, accion, permitidos, destino):
+        from bookings.exceptions import TransicionInvalida
+
+        if self.status not in permitidos:
+            raise TransicionInvalida(
+                estado_actual=self.status, accion=accion, permitidos=permitidos
+            )
+        self.status = destino
+        self.save(update_fields=["status", "updated_at"])
+
+    def confirmar(self):
+        self._transicionar(
+            accion="confirmar",
+            permitidos={self.Status.PENDING},
+            destino=self.Status.CONFIRMED,
+        )
+
+    def cancelar(self):
+        self._transicionar(
+            accion="cancelar",
+            permitidos={self.Status.PENDING, self.Status.CONFIRMED},
+            destino=self.Status.CANCELLED,
+        )
+
+    def completar(self):
+        self._transicionar(
+            accion="completar",
+            permitidos={self.Status.CONFIRMED},
+            destino=self.Status.COMPLETED,
+        )
+
+    def marcar_no_show(self):
+        self._transicionar(
+            accion="marcar_no_show",
+            permitidos={self.Status.CONFIRMED},
+            destino=self.Status.NO_SHOW,
+        )
+
 
 class Review(TimeStampedModel):
     booking = models.OneToOneField(

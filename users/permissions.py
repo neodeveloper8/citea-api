@@ -56,3 +56,13 @@ class IsOwnerOrReadOnly(BasePermission):
         for part in owner_field.split("."):
             owner = getattr(owner, part)
         return owner == request.user
+
+
+class PuedeCancelarBooking(BasePermission):
+    """Cancela quien es parte de la reserva: el cliente que reservó o el
+    dueño del negocio. Segundo candado (defensa en profundidad) del filtro
+    de queryset de la acción cancel."""
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        return obj.customer_id == user.id or obj.business.owner_id == user.id

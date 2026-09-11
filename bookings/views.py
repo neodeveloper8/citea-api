@@ -1,6 +1,7 @@
 import logging
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
@@ -12,7 +13,7 @@ from rest_framework.response import Response
 
 from businesses.models import Business
 from core.exceptions import SlotJustTaken, TransicionNoPermitida
-from users.permissions import IsDueno
+from users.permissions import IsDueno, PuedeCancelarBooking
 from .exceptions import TransicionInvalida
 from .filters import BookingFilter
 from .models import Booking
@@ -113,3 +114,27 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     )
     def confirm(self, request, pk=None):
         return self._transicionar_como_dueno(request, pk, metodo="confirmar")
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="cancel",
+        permission_classes=[IsAuthenticated, PuedeCancelarBooking],
+    )
+    def cancel(self, request, pk=None):
+        """Cancela una reserva. Actor: el cliente que reservó O el dueño del
+        negocio. Orígenes legales (pending/confirmed) los valida el modelo."""
+        with transaction.atomic():
+            booking = get_object_or_404(
+                Booking.objects.select_for_update(of=("self",))
+                .select_related("business")
+                .filter(Q(customer=request.user) | Q(business__owner=request.user)),
+                pk=pk,
+            )
+            self.check_object_permissions(request, booking)
+            try:
+                booking.cancelar()
+            except TransicionInvalida as exc:
+                raise TransicionNoPermitida(detail=str(exc))
+        serializer = BookingReadSerializer(booking, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)

@@ -39,6 +39,36 @@ class TestUserModel:
         assert admin.is_superuser is True
         assert admin.email_verified is True
 
+    def test_create_user_con_full_name_persiste(self):
+        """create_user con full_name lo guarda tal cual, y persiste (refetch)."""
+        User.objects.create_user(
+            email="c@test.pe", password="ClaveTest123", full_name="Juan Pérez"
+        )
+        user = User.objects.get(email="c@test.pe")
+        assert user.full_name == "Juan Pérez"
+
+    def test_create_user_sin_full_name_default_es_string_vacio(self):
+        """Sin full_name, el default es "" (string vacío), NO None."""
+        user = User.objects.create_user(email="d@test.pe", password="ClaveTest123")
+        assert user.full_name == ""
+        assert user.full_name is not None
+
+    def test_get_full_name_devuelve_full_name(self):
+        user = User.objects.create_user(
+            email="e@test.pe", password="ClaveTest123", full_name="Juan Pérez"
+        )
+        assert user.get_full_name() == "Juan Pérez"
+
+    def test_get_short_name_devuelve_primer_token(self):
+        user = User.objects.create_user(
+            email="f@test.pe", password="ClaveTest123", full_name="Juan Pérez"
+        )
+        assert user.get_short_name() == "Juan"
+
+    def test_get_short_name_vacio_si_full_name_vacio(self):
+        user = User.objects.create_user(email="g@test.pe", password="ClaveTest123")
+        assert user.get_short_name() == ""
+
 
 # ---------- Tests de registro ----------
 

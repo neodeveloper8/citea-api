@@ -11,6 +11,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         PLATFORM_ADMIN = "platform_admin", "Admin de plataforma"
 
     email = models.EmailField(unique=True)
+    full_name = models.CharField(max_length=150, blank=True, default="")
     phone = models.CharField(max_length=20, blank=True)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CLIENTE)
     email_verified = models.BooleanField(default=False)
@@ -25,6 +26,12 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+    def get_full_name(self):
+        return self.full_name
+
+    def get_short_name(self):
+        return self.full_name.split(" ")[0] if self.full_name else ""
 
     @property
     def is_cliente(self):

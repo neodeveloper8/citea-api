@@ -14,6 +14,11 @@ from rest_framework.response import Response
 from businesses.models import Business
 from core.exceptions import SlotJustTaken, TransicionNoPermitida
 from users.permissions import IsDueno, PuedeCancelarBooking
+from .emails import (
+    email_reserva_cancelada,
+    email_reserva_completada,
+    email_reserva_confirmada,
+)
 from .exceptions import TransicionInvalida
 from .filters import BookingFilter
 from .models import Booking
@@ -89,20 +94,22 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
                 raise SlotJustTaken()
             raise
 
-    def _transicionar_como_dueno(self, request, pk, *, metodo):
+    def _transicionar_como_dueno(self, request, pk, *, metodo, email_fn=None):
         """Transición solo-dueño, atómica y con la fila bloqueada.
         Candados: IsDueno (rol, 403) + filtro business__owner (ajena -> 404)."""
         with transaction.atomic():
             booking = get_object_or_404(
-                Booking.objects.select_for_update(of=("self",)).filter(
-                    business__owner=request.user
-                ),
+                Booking.objects.select_for_update(of=("self",))
+                .select_related("business", "service", "customer")
+                .filter(business__owner=request.user),
                 pk=pk,
             )
             try:
                 getattr(booking, metodo)()
             except TransicionInvalida as exc:
                 raise TransicionNoPermitida(detail=str(exc))
+            if email_fn is not None:
+                transaction.on_commit(lambda: email_fn(booking))
         serializer = BookingReadSerializer(booking, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -113,7 +120,9 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
         permission_classes=[IsAuthenticated, IsDueno],
     )
     def confirm(self, request, pk=None):
-        return self._transicionar_como_dueno(request, pk, metodo="confirmar")
+        return self._transicionar_como_dueno(
+            request, pk, metodo="confirmar", email_fn=email_reserva_confirmada
+        )
 
     @action(
         detail=True,
@@ -127,7 +136,7 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
         with transaction.atomic():
             booking = get_object_or_404(
                 Booking.objects.select_for_update(of=("self",))
-                .select_related("business")
+                .select_related("business", "service", "customer")
                 .filter(Q(customer=request.user) | Q(business__owner=request.user)),
                 pk=pk,
             )
@@ -136,6 +145,7 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
                 booking.cancelar()
             except TransicionInvalida as exc:
                 raise TransicionNoPermitida(detail=str(exc))
+            transaction.on_commit(lambda: email_reserva_cancelada(booking))
         serializer = BookingReadSerializer(booking, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -146,7 +156,9 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
         permission_classes=[IsAuthenticated, IsDueno],
     )
     def complete(self, request, pk=None):
-        return self._transicionar_como_dueno(request, pk, metodo="completar")
+        return self._transicionar_como_dueno(
+            request, pk, metodo="completar", email_fn=email_reserva_completada
+        )
 
     @action(
         detail=True,

@@ -1,4 +1,6 @@
 # Create your tests here.
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
@@ -165,6 +167,22 @@ class TestRegister:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "full_name" in response.data["details"]
 
+    def test_register_mail_caido_no_voltea_el_registro(self, api_client):
+        """🔑 Un mail caído no debe impedir que el registro se complete."""
+        with patch("core.emails.send_mail", side_effect=Exception("SMTP caído")):
+            response = api_client.post(
+                reverse("register"),
+                {
+                    "email": "mailcaido@test.pe",
+                    "password": "ClaveSegura123",
+                    "full_name": "Test User",
+                },
+                format="json",
+            )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        assert User.objects.filter(email="mailcaido@test.pe").exists()
+
 
 # ---------- Tests de login ----------
 
@@ -226,6 +244,28 @@ class TestPasswordReset:
             format="json",
         )
         assert response.status_code == status.HTTP_200_OK
+
+    def test_reset_request_email_registrado_con_mail_caido_misma_respuesta(
+        self, api_client, cliente_user
+    ):
+        """🔑 SEGURIDAD: si el mail falla al enviarse para un email SÍ
+        registrado, la respuesta sigue siendo idéntica a la de un email
+        inexistente. Un mail caído no debe crear un oráculo de enumeración."""
+        with patch("core.emails.send_mail", side_effect=Exception("SMTP caído")):
+            response_registrado = api_client.post(
+                reverse("password_reset"),
+                {"email": "cliente@test.pe"},  # existe, viene de la fixture
+                format="json",
+            )
+
+        response_inexistente = api_client.post(
+            reverse("password_reset"),
+            {"email": "noexiste@test.pe"},
+            format="json",
+        )
+
+        assert response_registrado.status_code == response_inexistente.status_code
+        assert response_registrado.data == response_inexistente.data
 
     def test_reset_confirm_changes_password(self, api_client, cliente_user):
         """El flujo completo de reset cambia el password."""

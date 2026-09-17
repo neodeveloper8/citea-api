@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 import cloudinary.uploader
 from django.db import transaction
-from django.db.models import Prefetch, Q
+from django.db.models import Avg, Count, Prefetch, Q
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -99,10 +99,19 @@ class BusinessViewSet(
             visible = Q(status=Business.Status.APPROVED)
             if user.is_authenticated:
                 visible |= Q(owner=user)
-            return qs.filter(visible).prefetch_related(
-                Prefetch("services", queryset=Service.objects.filter(is_active=True)),
-                "hours",
-                "images",
+            return (
+                qs.filter(visible)
+                .annotate(
+                    rating_avg_ann=Avg("bookings__review__rating"),
+                    rating_count_ann=Count("bookings__review", distinct=True),
+                )
+                .prefetch_related(
+                    Prefetch(
+                        "services", queryset=Service.objects.filter(is_active=True)
+                    ),
+                    "hours",
+                    "images",
+                )
             )
 
         # list (público): solo aprobados, con portada prefetcheada.

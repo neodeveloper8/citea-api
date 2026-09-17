@@ -241,6 +241,21 @@ class ReviewResponseReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class PublicReviewSerializer(serializers.ModelSerializer):
+    # Deliberadamente mínimo: este dato es público, sin auth. NO exponer
+    # "booking" ni email/phone/nombre completo del cliente — solo el primer
+    # nombre vía get_short_name (sale "" si el user legacy no tiene full_name).
+    author = serializers.CharField(
+        source="booking.customer.get_short_name", read_only=True
+    )
+    response = ReviewResponseReadSerializer(read_only=True)
+
+    class Meta:
+        model = Review
+        fields = ["id", "rating", "comment", "author", "created_at", "response"]
+        read_only_fields = fields
+
+
 class OwnerReviewSerializer(serializers.ModelSerializer):
     response = ReviewResponseReadSerializer(read_only=True)
     customer_name = serializers.CharField(

@@ -1,5 +1,8 @@
 from rest_framework import serializers
 
+from bookings.models import Review
+from bookings.serializers import PublicReviewSerializer
+
 from .models import Business, BusinessHours, BusinessImage, Category, Service
 
 
@@ -49,6 +52,9 @@ class BusinessDetailSerializer(serializers.ModelSerializer):
     services = ServiceSerializer(many=True, read_only=True)
     hours = BusinessHoursSerializer(many=True, read_only=True)
     images = BusinessImageSerializer(many=True, read_only=True)
+    rating_avg = serializers.SerializerMethodField()
+    rating_count = serializers.SerializerMethodField()
+    reviews = serializers.SerializerMethodField()
 
     class Meta:
         model = Business
@@ -67,7 +73,28 @@ class BusinessDetailSerializer(serializers.ModelSerializer):
             "services",
             "hours",
             "images",
+            "rating_avg",
+            "rating_count",
+            "reviews",
         ]
+
+    def get_rating_avg(self, obj):
+        # Anotado en BusinessViewSet.get_queryset() (rama retrieve). El
+        # getattr con default cubre el caso de usar este serializer sin esa
+        # anotación (ej. en un test o shell que no pase por la view).
+        avg = getattr(obj, "rating_avg_ann", None)
+        return round(avg, 1) if avg is not None else None
+
+    def get_rating_count(self, obj):
+        return getattr(obj, "rating_count_ann", 0)
+
+    def get_reviews(self, obj):
+        qs = (
+            Review.objects.filter(booking__business=obj)
+            .select_related("booking__customer", "response")
+            .order_by("-created_at")[:10]
+        )
+        return PublicReviewSerializer(qs, many=True, context=self.context).data
 
 
 class ServiceWriteSerializer(serializers.ModelSerializer):

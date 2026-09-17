@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 from businesses.models import Business, Service
 from bookings.availability import calcular_slots
-from bookings.models import Booking, Review
+from bookings.models import Booking, Review, ReviewResponse
 from users.models import User
 
 LIMA_TZ = ZoneInfo("America/Lima")
@@ -209,4 +209,53 @@ class ReviewReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Review
         fields = ["id", "booking", "rating", "comment", "created_at"]
+        read_only_fields = fields
+
+
+class ReviewResponseCreateSerializer(serializers.ModelSerializer):
+    review = serializers.PrimaryKeyRelatedField(queryset=Review.objects.none())
+
+    class Meta:
+        model = ReviewResponse
+        fields = ["id", "review", "body"]
+        read_only_fields = ["id"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            self.fields["review"].queryset = Review.objects.filter(
+                booking__business__owner=request.user
+            )
+
+    def validate_review(self, review):
+        if ReviewResponse.objects.filter(review=review).exists():
+            raise serializers.ValidationError("Esta reseña ya tiene respuesta.")
+        return review
+
+
+class ReviewResponseReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReviewResponse
+        fields = ["id", "review", "body", "created_at"]
+        read_only_fields = fields
+
+
+class OwnerReviewSerializer(serializers.ModelSerializer):
+    response = ReviewResponseReadSerializer(read_only=True)
+    customer_name = serializers.CharField(
+        source="booking.customer.get_full_name", read_only=True
+    )
+
+    class Meta:
+        model = Review
+        fields = [
+            "id",
+            "booking",
+            "rating",
+            "comment",
+            "created_at",
+            "customer_name",
+            "response",
+        ]
         read_only_fields = fields

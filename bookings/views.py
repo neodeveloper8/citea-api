@@ -12,7 +12,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from businesses.models import Business
-from core.exceptions import ReviewDuplicada, SlotJustTaken, TransicionNoPermitida
+from core.exceptions import (
+    ReviewDuplicada,
+    RespuestaDuplicada,
+    SlotJustTaken,
+    TransicionNoPermitida,
+)
 from users.permissions import IsDueno, PuedeCancelarBooking
 from .emails import (
     email_reserva_cancelada,
@@ -21,12 +26,15 @@ from .emails import (
 )
 from .exceptions import TransicionInvalida
 from .filters import BookingFilter
-from .models import Booking, Review
+from .models import Booking, Review, ReviewResponse
 from .serializers import (
     BookingCreateSerializer,
     BookingReadSerializer,
+    OwnerReviewSerializer,
     ReviewCreateSerializer,
     ReviewReadSerializer,
+    ReviewResponseCreateSerializer,
+    ReviewResponseReadSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -188,4 +196,46 @@ class ReviewViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
         except IntegrityError:
             raise ReviewDuplicada()
         read = ReviewReadSerializer(review, context={"request": request})
+        return Response(read.data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="business/(?P<slug>[^/.]+)",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def business(self, request, slug=None):
+        # Si el negocio no es del dueño, el queryset sale vacío -> lista
+        # vacía, no 404. Es lista, no detalle: no filtramos existencia de
+        # un objeto puntual.
+        qs = (
+            Review.objects.filter(
+                booking__business__slug=slug,
+                booking__business__owner=request.user,
+            )
+            .select_related("booking__customer", "response")
+            .order_by("-created_at")
+        )
+        page = self.paginate_queryset(qs)
+        ser = OwnerReviewSerializer(page or qs, many=True, context={"request": request})
+        return (
+            self.get_paginated_response(ser.data)
+            if page is not None
+            else Response(ser.data)
+        )
+
+
+class ReviewResponseViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
+    queryset = ReviewResponse.objects.all()
+    permission_classes = [IsAuthenticated, IsDueno]
+    serializer_class = ReviewResponseCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        try:
+            resp = write.save()
+        except IntegrityError:
+            raise RespuestaDuplicada()
+        read = ReviewResponseReadSerializer(resp, context={"request": request})
         return Response(read.data, status=status.HTTP_201_CREATED)

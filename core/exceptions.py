@@ -29,6 +29,12 @@ class TransicionNoPermitida(APIException):
     default_code = "transicion_no_permitida"
 
 
+class ReviewDuplicada(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "Ya existe una reseña para esta reserva."
+    default_code = "review_duplicada"
+
+
 def custom_exception_handler(exc, context):
     # 1. Dejamos que DRF maneje la excepción primero. Nos devuelve un Response
     #    con el status code correcto (400, 401, 403, 404...) y el cuerpo en SU formato.

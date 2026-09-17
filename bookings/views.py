@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from businesses.models import Business
-from core.exceptions import SlotJustTaken, TransicionNoPermitida
+from core.exceptions import ReviewDuplicada, SlotJustTaken, TransicionNoPermitida
 from users.permissions import IsDueno, PuedeCancelarBooking
 from .emails import (
     email_reserva_cancelada,
@@ -21,8 +21,13 @@ from .emails import (
 )
 from .exceptions import TransicionInvalida
 from .filters import BookingFilter
-from .models import Booking
-from .serializers import BookingCreateSerializer, BookingReadSerializer
+from .models import Booking, Review
+from .serializers import (
+    BookingCreateSerializer,
+    BookingReadSerializer,
+    ReviewCreateSerializer,
+    ReviewReadSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,3 +173,19 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     )
     def no_show(self, request, pk=None):
         return self._transicionar_como_dueno(request, pk, metodo="marcar_no_show")
+
+
+class ReviewViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
+    queryset = Review.objects.all()
+    permission_classes = [IsAuthenticated]
+    serializer_class = ReviewCreateSerializer
+
+    def create(self, request, *args, **kwargs):
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        try:
+            review = write.save()
+        except IntegrityError:
+            raise ReviewDuplicada()
+        read = ReviewReadSerializer(review, context={"request": request})
+        return Response(read.data, status=status.HTTP_201_CREATED)

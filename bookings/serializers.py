@@ -6,7 +6,7 @@ from rest_framework import serializers
 
 from businesses.models import Business, Service
 from bookings.availability import calcular_slots
-from bookings.models import Booking
+from bookings.models import Booking, Review
 from users.models import User
 
 LIMA_TZ = ZoneInfo("America/Lima")
@@ -173,4 +173,40 @@ class BookingReadSerializer(serializers.ModelSerializer):
             "service",
             "customer",
         ]
+        read_only_fields = fields
+
+
+class ReviewCreateSerializer(serializers.ModelSerializer):
+    booking = serializers.PrimaryKeyRelatedField(queryset=Booking.objects.none())
+    rating = serializers.IntegerField(min_value=1, max_value=5)
+
+    class Meta:
+        model = Review
+        fields = ["id", "booking", "rating", "comment"]
+        read_only_fields = ["id"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        request = self.context.get("request")
+        if request is not None and request.user.is_authenticated:
+            self.fields["booking"].queryset = Booking.objects.filter(
+                customer=request.user
+            )
+
+    def validate_booking(self, booking):
+        if booking.status != Booking.Status.COMPLETED:
+            raise serializers.ValidationError(
+                "Solo podés reseñar una reserva completada."
+            )
+        if Review.objects.filter(booking=booking).exists():
+            raise serializers.ValidationError(
+                "Ya dejaste una reseña para esta reserva."
+            )
+        return booking
+
+
+class ReviewReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Review
+        fields = ["id", "booking", "rating", "comment", "created_at"]
         read_only_fields = fields

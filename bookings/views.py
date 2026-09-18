@@ -2,7 +2,7 @@ import logging
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import mixins, status, viewsets
@@ -25,6 +25,7 @@ from .emails import (
     email_reserva_confirmada,
 )
 from .exceptions import TransicionInvalida
+from .exports import generar_csv, recolectar_clientes
 from .filters import BookingFilter
 from .models import Booking, Review, ReviewResponse
 from .serializers import (
@@ -181,6 +182,28 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     )
     def no_show(self, request, pk=None):
         return self._transicionar_como_dueno(request, pk, metodo="marcar_no_show")
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path=r"business/(?P<slug>[\w-]+)/export",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def export_clients(self, request, slug=None):
+        # scopeo por owner: si el slug es de otro dueño, no hay negocio -> 404.
+        # (acá SÍ 404, porque necesitamos el objeto business concreto para el
+        #  filename y para filtrar; usamos el patrón Variante A del propio
+        #  BookingViewSet.business)
+        business = get_object_or_404(Business, slug=slug)
+        if business.owner != request.user:
+            raise Http404()
+        filas = recolectar_clientes(business)
+        contenido = generar_csv(filas)
+        resp = HttpResponse(contenido, content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = (
+            f'attachment; filename="clientes_{business.slug}.csv"'
+        )
+        return resp
 
 
 class ReviewViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):

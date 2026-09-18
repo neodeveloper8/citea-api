@@ -150,6 +150,12 @@ DEFAULT_FROM_EMAIL = config(
 # URL del frontend, para armar los links de los emails
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:5173")
 
+# Restricción por no-shows: umbral de inasistencias (por negocio, ventana
+# móvil medida en días) que bloquea a un cliente de reservar. Computado
+# on-the-fly, sin campo/migración (ver bookings/restrictions.py).
+CITEA_NOSHOW_UMBRAL = config("CITEA_NOSHOW_UMBRAL", default=2, cast=int)
+CITEA_NOSHOW_VENTANA_DIAS = config("CITEA_NOSHOW_VENTANA_DIAS", default=90, cast=int)
+
 
 cloudinary.config(
     cloud_name=config("CLOUDINARY_CLOUD_NAME", default=""),

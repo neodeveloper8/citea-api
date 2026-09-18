@@ -7,6 +7,8 @@ from rest_framework import serializers
 from businesses.models import Business, Service
 from bookings.availability import calcular_slots
 from bookings.models import Booking, Review, ReviewResponse
+from bookings.restrictions import esta_restringido
+from core.exceptions import ClienteRestringido
 from users.models import User
 
 LIMA_TZ = ZoneInfo("America/Lima")
@@ -48,9 +50,15 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
+        request = self.context["request"]
         business = attrs["business"]
         service = attrs["service"]
         start_datetime = attrs["start_datetime"]
+
+        if esta_restringido(
+            customer=request.user, business=business, ahora=timezone.now()
+        ):
+            raise ClienteRestringido()
 
         if service.business_id != business.id:
             raise serializers.ValidationError(

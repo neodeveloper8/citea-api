@@ -16,17 +16,26 @@ COLUMNAS = [
 
 
 def recolectar_clientes(business):
-    """Devuelve una lista de dicts, uno por CLIENTE ÚNICO con >=1 booking
-    COMPLETED en el negocio. Dos queries agrupadas (no N+1):
+    """Devuelve una lista de dicts: una fila por CLIENTE CON CUENTA único
+    (agrupado, agregando visitas) + una fila SUELTA por cada booking COMPLETED
+    de un guest (customer=None, booking direct telefónico).
+
+    Los guests NO se deduplican entre sí: no hay forma fiable de saber si dos
+    "María" telefónicas son la misma persona (solo tenemos nombre/teléfono
+    sueltos, sin cuenta que los identifique). Deuda conocida para cuando/si
+    se decida matchear por teléfono.
+
+    Dos queries agrupadas para los clientes con cuenta (no N+1):
     1) agregados por cliente (visitas, última visita)
     2) servicio más frecuente por cliente (modo), resuelto en un dict."""
     completed = Booking.objects.filter(
         business=business, status=Booking.Status.COMPLETED
     )
+    completed_con_cuenta = completed.filter(customer__isnull=False)
 
     # Query 1: agregados por cliente
     agregados = (
-        completed.values("customer")
+        completed_con_cuenta.values("customer")
         .annotate(visitas=Count("id"), ultima=Max("start_datetime"))
         .order_by("-visitas")
     )
@@ -34,7 +43,7 @@ def recolectar_clientes(business):
     # Query 2: servicio más frecuente por cliente (modo)
     # (customer, service) -> conteo; nos quedamos con el top por customer
     por_servicio = (
-        completed.values("customer", "service__name")
+        completed_con_cuenta.values("customer", "service__name")
         .annotate(n=Count("id"))
         .order_by("customer", "-n", "service__name")
     )
@@ -64,6 +73,20 @@ def recolectar_clientes(business):
                 "visitas": a["visitas"],
                 "ultima_visita": a["ultima"].date().isoformat() if a["ultima"] else "",
                 "servicio_mas_frecuente": servicio_top.get(a["customer"], ""),
+            }
+        )
+
+    # Guests: una fila POR BOOKING, sin agrupar (ver docstring).
+    guests = completed.filter(customer__isnull=True).select_related("service")
+    for booking in guests:
+        filas.append(
+            {
+                "nombre": booking.guest_name,
+                "email": "",
+                "telefono": booking.guest_phone,
+                "visitas": 1,
+                "ultima_visita": booking.start_datetime.date().isoformat(),
+                "servicio_mas_frecuente": booking.service.name,
             }
         )
     return filas

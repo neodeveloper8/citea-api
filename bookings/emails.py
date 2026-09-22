@@ -5,8 +5,16 @@ from core.emails import enviar_email_seguro
 _LIMA = ZoneInfo("America/Lima")
 
 
-def _saludo(customer):
-    return (customer.get_full_name() or "").strip() or "cliente"
+def _nombre_cliente(booking):
+    """Nombre a mostrar: el del customer si hay cuenta, si no el guest_name
+    (booking direct telefónico)."""
+    if booking.customer is not None:
+        return booking.customer.get_full_name()
+    return booking.guest_name
+
+
+def _saludo(booking):
+    return (_nombre_cliente(booking) or "").strip() or "cliente"
 
 
 def _fecha_local(dt):
@@ -14,48 +22,62 @@ def _fecha_local(dt):
 
 
 def email_reserva_confirmada(booking):
-    customer = booking.customer
+    # Un booking direct (guest, sin cuenta) no tiene email al cual mandar.
+    # Nunca manda mail: decisión deliberada, no un descuido.
+    if booking.customer is None:
+        return False
+
     negocio = booking.business.name
     servicio = booking.service.name
     fecha = _fecha_local(booking.start_datetime)
 
     subject = f"Tu reserva en {negocio} fue confirmada — Citea"
     message = (
-        f"Hola {_saludo(customer)},\n\n"
+        f"Hola {_saludo(booking)},\n\n"
         f"Tu reserva en {negocio} fue confirmada.\n"
         f"Servicio: {servicio}\n"
         f"Fecha: {fecha}\n\n"
         f"¡Te esperamos!"
     )
-    return enviar_email_seguro(subject=subject, message=message, to=customer.email)
+    return enviar_email_seguro(
+        subject=subject, message=message, to=booking.customer.email
+    )
 
 
 def email_reserva_cancelada(booking):
-    customer = booking.customer
+    if booking.customer is None:
+        return False
+
     negocio = booking.business.name
     servicio = booking.service.name
     fecha = _fecha_local(booking.start_datetime)
 
     subject = f"Tu reserva en {negocio} fue cancelada — Citea"
     message = (
-        f"Hola {_saludo(customer)},\n\n"
+        f"Hola {_saludo(booking)},\n\n"
         f"Tu reserva en {negocio} fue cancelada.\n"
         f"Servicio: {servicio}\n"
         f"Fecha: {fecha}\n\n"
         f"Si no la cancelaste vos, contactá al negocio."
     )
-    return enviar_email_seguro(subject=subject, message=message, to=customer.email)
+    return enviar_email_seguro(
+        subject=subject, message=message, to=booking.customer.email
+    )
 
 
 def email_reserva_completada(booking):
-    customer = booking.customer
+    if booking.customer is None:
+        return False
+
     negocio = booking.business.name
     servicio = booking.service.name
 
     subject = f"Gracias por tu visita a {negocio} — Citea"
     message = (
-        f"Hola {_saludo(customer)},\n\n"
+        f"Hola {_saludo(booking)},\n\n"
         f"Gracias por tu visita a {negocio} para {servicio}.\n"
         f"¡Esperamos verte de nuevo pronto!"
     )
-    return enviar_email_seguro(subject=subject, message=message, to=customer.email)
+    return enviar_email_seguro(
+        subject=subject, message=message, to=booking.customer.email
+    )

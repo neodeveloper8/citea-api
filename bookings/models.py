@@ -36,6 +36,8 @@ class Booking(TimeStampedModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="bookings",
+        null=True,
+        blank=True,
     )
     business = models.ForeignKey(
         Business,
@@ -68,6 +70,11 @@ class Booking(TimeStampedModel):
 
     customer_note = models.TextField(blank=True)
 
+    # Cliente telefónico (sin cuenta): mutuamente excluyente con customer,
+    # forzado por la CheckConstraint booking_customer_xor_guest en Meta.
+    guest_name = models.CharField(max_length=150, blank=True, default="")
+    guest_phone = models.CharField(max_length=20, blank=True, default="")
+
     class Meta:
         verbose_name = "Reserva"
         verbose_name_plural = "Reservas"
@@ -81,6 +88,13 @@ class Booking(TimeStampedModel):
             models.CheckConstraint(
                 condition=models.Q(end_datetime__gt=models.F("start_datetime")),
                 name="booking_end_after_start",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(customer__isnull=False) & models.Q(guest_name=""))
+                    | (models.Q(customer__isnull=True) & ~models.Q(guest_name=""))
+                ),
+                name="booking_customer_xor_guest",
             ),
             ExclusionConstraint(
                 name="excluir_reservas_solapadas",

@@ -28,3 +28,5 @@ virtualenv==21.4.1
 cloudinary==1.45.0
 django-filter==25.2
 drf-spectacular==0.29.0
+django-q2==1.11.1
+django-picklefield==3.4.0

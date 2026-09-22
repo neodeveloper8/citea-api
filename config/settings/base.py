@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "django_filters",
     "drf_spectacular",
+    "django_q",
     # local
     "core",
     "users",
@@ -155,6 +156,23 @@ FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:5173")
 # on-the-fly, sin campo/migración (ver bookings/restrictions.py).
 CITEA_NOSHOW_UMBRAL = config("CITEA_NOSHOW_UMBRAL", default=2, cast=int)
 CITEA_NOSHOW_VENTANA_DIAS = config("CITEA_NOSHOW_VENTANA_DIAS", default=90, cast=int)
+
+
+# Cola de tareas (django-q2). Broker = la propia BD Postgres, sin Redis:
+# una dependencia menos de infra para el MVP.
+Q_CLUSTER = {
+    "name": "citea",
+    "workers": 2,
+    "timeout": 60,
+    "retry": 120,
+    "queue_limit": 50,
+    "orm": "default",  # broker = la propia BD (Postgres), sin Redis
+    # catch_up=False: si el worker estuvo caído, al volver NO dispara de golpe
+    # todos los barridos que "debió" correr. El barrido es idempotente
+    # (reminder_sent_at), así que la próxima corrida normal recupera las
+    # reservas pendientes sin avalancha de tareas atrasadas.
+    "catch_up": False,
+}
 
 
 cloudinary.config(

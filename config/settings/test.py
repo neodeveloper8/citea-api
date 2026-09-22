@@ -3,8 +3,12 @@ from .base import *  # noqa
 # BD en memoria con SQLite: se crea y destruye al instante, no toca Supabase.
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",  # ":memory:" = vive en RAM, no escribe a disco
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "citea",
+        "USER": "citea",
+        "PASSWORD": "citea",
+        "HOST": "localhost",
+        "PORT": "5433",
     }
 }
 
@@ -20,4 +24,11 @@ REST_FRAMEWORK = {
     **REST_FRAMEWORK,  # hereda lo de base
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {},
+}
+
+# sync=True: las tasks corren en el MISMO proceso del test, de forma síncrona.
+# Sin esto haría falta un qcluster real levantado para que se ejecuten.
+Q_CLUSTER = {
+    **Q_CLUSTER,  # hereda lo de base
+    "sync": True,
 }

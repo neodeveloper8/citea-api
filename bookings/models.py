@@ -68,6 +68,10 @@ class Booking(TimeStampedModel):
     )
     is_first_booking_for_business = models.BooleanField(default=False)
 
+    # Sello del recordatorio ya enviado: hace idempotente al barrido (una
+    # reserva recordada no se vuelve a recordar en la corrida siguiente).
+    reminder_sent_at = models.DateTimeField(null=True, blank=True)
+
     customer_note = models.TextField(blank=True)
 
     # Cliente telefónico (sin cuenta): mutuamente excluyente con customer,
@@ -83,6 +87,9 @@ class Booking(TimeStampedModel):
             models.Index(fields=["business", "start_datetime"]),
             models.Index(fields=["customer", "status"]),
             models.Index(fields=["status"]),
+            # Cubre el barrido de recordatorios: status + ventana de
+            # start_datetime.
+            models.Index(fields=["status", "start_datetime"]),
         ]
         constraints = [
             models.CheckConstraint(

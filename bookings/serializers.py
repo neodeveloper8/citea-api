@@ -142,6 +142,70 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         )
 
 
+class DirectBookingSerializer(serializers.ModelSerializer):
+    """Reserva 'direct' que carga el DUEÑO por un cliente sin cuenta (guest,
+    telefónico). Deliberadamente separado de BookingCreateSerializer: sin
+    customer, sin candado de restricción por no-shows, sin match contra la
+    grilla de disponibilidad (el dueño mete el horario que quiera). La
+    ExclusionConstraint de la BD sigue protegiendo el anti-solape igual."""
+
+    class Meta:
+        model = Booking
+        fields = [
+            "id",
+            "business",
+            "service",
+            "start_datetime",
+            "guest_name",
+            "guest_phone",
+        ]
+        # NO exponer customer/source/status/end_datetime/price/duration:
+        # los pone el backend.
+
+    def validate_guest_name(self, value):
+        v = (value or "").strip()
+        if not v:
+            raise serializers.ValidationError("El nombre del cliente es obligatorio.")
+        return v
+
+    def validate_business(self, business):
+        # candado de ownership: el dueño solo carga direct en SU negocio.
+        request = self.context["request"]
+        if business.owner_id != request.user.id:
+            raise serializers.ValidationError("No es tu negocio.")
+        return business
+
+    def validate(self, attrs):
+        # service pertenece al business + activo (como el de cliente).
+        # NO valida grilla ni restricción: el dueño mete el horario que quiera.
+        service = attrs["service"]
+        business = attrs["business"]
+        if service.business_id != business.id:
+            raise serializers.ValidationError(
+                {"service": "El servicio no pertenece a este negocio."}
+            )
+        if not service.is_active:
+            raise serializers.ValidationError(
+                {"service": "El servicio no está activo."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        service = validated_data["service"]
+        start = validated_data["start_datetime"]
+        # snapshot igual que el flujo normal:
+        validated_data["end_datetime"] = start + timedelta(
+            minutes=service.duration_minutes
+        )
+        validated_data["price_at_booking"] = service.price
+        validated_data["duration_at_booking"] = service.duration_minutes
+        # autoridad del backend:
+        validated_data["customer"] = None
+        validated_data["source"] = Booking.Source.DIRECT
+        validated_data["status"] = Booking.Status.CONFIRMED
+        return Booking.objects.create(**validated_data)
+
+
 class BookingBusinessSerializer(serializers.ModelSerializer):
     class Meta:
         model = Business
@@ -180,6 +244,8 @@ class BookingReadSerializer(serializers.ModelSerializer):
             "business",
             "service",
             "customer",
+            "guest_name",
+            "guest_phone",
         ]
         read_only_fields = fields
 

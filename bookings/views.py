@@ -31,6 +31,7 @@ from .models import Booking, Review, ReviewResponse
 from .serializers import (
     BookingCreateSerializer,
     BookingReadSerializer,
+    DirectBookingSerializer,
     OwnerReviewSerializer,
     ReviewCreateSerializer,
     ReviewReadSerializer,
@@ -204,6 +205,25 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
             f'attachment; filename="clientes_{business.slug}.csv"'
         )
         return resp
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="direct",
+        permission_classes=[IsAuthenticated, IsDueno],
+    )
+    def direct(self, request):
+        write = DirectBookingSerializer(data=request.data, context={"request": request})
+        write.is_valid(raise_exception=True)
+        try:
+            with transaction.atomic():
+                booking = write.save()
+        except IntegrityError as exc:
+            if "excluir_reservas_solapadas" in str(exc):
+                raise SlotJustTaken()
+            raise
+        read = BookingReadSerializer(booking, context={"request": request})
+        return Response(read.data, status=status.HTTP_201_CREATED)
 
 
 class ReviewViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):

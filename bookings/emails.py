@@ -81,3 +81,22 @@ def email_reserva_completada(booking):
     return enviar_email_seguro(
         subject=subject, message=message, to=booking.customer.email
     )
+
+
+def email_recordatorio(booking):
+    if booking.customer is None:
+        return False
+
+    cuando = _fecha_local(booking.start_datetime)
+    negocio = booking.business.name
+
+    return enviar_email_seguro(
+        subject=f"Recordatorio: tu reserva en {negocio} es mañana — Citea",
+        message=(
+            f"Hola {_saludo(booking)},\n\n"
+            f"Te recordamos tu reserva en {negocio} para {cuando}.\n"
+            f"Servicio: {booking.service.name}.\n\n"
+            f"Si no vas a poder asistir, cancelá con tiempo. ¡Te esperamos!"
+        ),
+        to=booking.customer.email,
+    )

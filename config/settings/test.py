@@ -28,6 +28,11 @@ REST_FRAMEWORK = {
     **REST_FRAMEWORK,  # hereda lo de base
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_THROTTLE_RATES": {},
+    # El frontend manda JSON: los tests tienen que ejercitar el mismo encoder.
+    # El default de DRF es multipart, que convierte todo a string y esconde
+    # errores de tipo (None, bool, int, listas anidadas). multipart queda solo
+    # para los uploads, que lo declaran explícito.
+    "TEST_REQUEST_DEFAULT_FORMAT": "json",
 }
 
 # sync=True: las tasks corren en el MISMO proceso del test, de forma síncrona.

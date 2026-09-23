@@ -130,5 +130,9 @@ implementa en Fase 3. NO se usa django-cloudinary-storage ni CloudinaryField.
 - Logout invalida el refresh token vía token_blacklist. El access expira solo (30 min).
 - Reset/verify usan default_token_generator (un solo uso), NO JWT.
 - Tests: pytest + pytest-django. Correr con `pytest` (usa config.settings.test).
+- El APIClient manda JSON por defecto (TEST_REQUEST_DEFAULT_FORMAT en test.py).
+  Solo los uploads declaran format="multipart". Razón: multipart convierte todo
+  a string y esconde errores de tipo (None, bool, int, listas anidadas), así que
+  los tests no ejercitarían el mismo encoder que usa el frontend.
 - Django 6.x: varias APIs cambiaron vs 4/5. Ej: CheckConstraint usa condition=, no check=.
   Verificar compatibilidad de libs de terceros antes de instalar.

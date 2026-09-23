@@ -76,10 +76,19 @@ implementa en Fase 3. NO se usa django-cloudinary-storage ni CloudinaryField.
 ```
   NOTA: `error` es el string del mensaje; `code` y `details` son hermanos al nivel raíz
   (NO anidados dentro de `error`).
-  ESTADO REAL: el handler existe y está registrado, pero NO tiene tests directos
-  (core/tests.py solo cubre enviar_email_seguro). La única cobertura es indirecta,
-  vía asserts sobre `code` en tests de endpoints, y el formato todavía no es
-  uniforme: pendiente de saneamiento.
+  CONTRATO (garantizado por core/tests/test_exception_handler.py): TODA respuesta de
+  error tiene exactamente esas 3 claves, y `details` es SIEMPRE un dict (vacío si no
+  hay detalle; nunca lista, nunca null). Hay un test de invariante parametrizado sobre
+  todas las excepciones del sistema que lo verifica.
+  - Los 404/403 que vienen de Http404 / PermissionDenied de Django se convierten a las
+    de DRF ANTES de llamar al handler de DRF, para que salgan con `not_found` /
+    `permission_denied` y no con `error`. La conversión va SIN argumentos: el mensaje
+    de la Http404 es texto interno y no se filtra al cliente.
+  - Los errores de validación con forma de lista (serializers con many=True, ej. el PUT
+    de hours) se normalizan a `{"items": {"<indice>": {...}}}`, conservando qué item
+    falló y descartando los índices vacíos.
+  - Un único error de no-campo se usa como `error`; con varios campos gana el genérico.
+  - `Throttled` expone el tiempo de espera en `details["wait"]`.
 
 ## Reglas que NO se rompen
 

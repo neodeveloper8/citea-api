@@ -300,3 +300,35 @@ def test_business_filtro_status_confirmed(api_client, escenario):
     assert response.status_code == 200
     ids = {b["id"] for b in response.json()["results"]}
     assert ids == {escenario["a2"].id}
+
+
+# --- Contrato de error en los 404 ---------------------------------------
+# Esta view llega al 404 por dos caminos distintos y los dos levantan la
+# Http404 de Django, que no tiene default_code. Antes del saneamiento salían
+# con code "error"; acá se fija que salgan con "not_found".
+
+
+def test_business_slug_inexistente_respeta_el_contrato_de_error(api_client, escenario):
+    # Camino get_object_or_404 de django.shortcuts.
+    api_client.force_authenticate(user=escenario["dueno_a"])
+    response = api_client.get("/api/bookings/business/no-existe-este-slug/")
+
+    data = response.json()
+    assert response.status_code == 404
+    assert data["code"] == "not_found"
+    assert set(data.keys()) == {"error", "code", "details"}
+    assert data["details"] == {}
+
+
+def test_business_de_otro_dueno_respeta_el_contrato_de_error(api_client, escenario):
+    # Camino raise Http404() explícito: se responde 404 (no 403) para no
+    # confirmarle a un no-dueño que el negocio existe.
+    api_client.force_authenticate(user=escenario["dueno_b"])
+    response = api_client.get(_business_url(escenario["business"]))
+
+    data = response.json()
+    assert response.status_code == 404
+    assert data["code"] == "not_found"
+    assert set(data.keys()) == {"error", "code", "details"}
+    # El slug del negocio ajeno no se filtra en el mensaje.
+    assert escenario["business"].slug not in data["error"]

@@ -52,15 +52,33 @@ def service(business):
 
 
 def _payload(
-    business, service, inicio, guest_name="Pedro Tel", guest_phone="987654321"
+    business,
+    service,
+    inicio,
+    guest_name="Pedro Tel",
+    guest_phone="987654321",
+    omitir=(),
+    extra=None,
 ):
-    return {
+    """Payload de una reserva direct.
+
+    'omitir' saca claves del body: un campo AUSENTE no es lo mismo que un
+    campo vacío, porque los validate_<campo> de DRF solo corren sobre los
+    campos presentes.
+    'extra' agrega claves para probar mass assignment.
+    """
+    body = {
         "business": business.id,
         "service": service.id,
         "start_datetime": inicio.isoformat(),
         "guest_name": guest_name,
         "guest_phone": guest_phone,
     }
+    for clave in omitir:
+        body.pop(clave, None)
+    if extra:
+        body.update(extra)
+    return body
 
 
 # --- Camino feliz -----------------------------------------------------
@@ -107,6 +125,68 @@ def test_guest_name_vacio_o_solo_espacios_da_400(
     )
 
     assert response.status_code == 400
+
+
+def test_guest_name_ausente_da_400_y_no_rompe_el_xor(
+    api_client, dueno_user, business, service
+):
+    # REGRESIÓN: guest_name es blank=True en el modelo, así que el
+    # ModelSerializer lo tomaba como required=False. Ausente, validate_guest_name
+    # no corría (los validadores de campo solo ven campos presentes) y create()
+    # insertaba customer=None + guest_name="" -> violación de la CheckConstraint
+    # booking_customer_xor_guest -> IntegrityError sin capturar -> 500.
+    inicio = _aware_lima(_manana(), time(10, 0))
+
+    api_client.force_authenticate(user=dueno_user)
+    response = api_client.post(
+        URL, _payload(business, service, inicio, omitir=["guest_name"])
+    )
+
+    data = response.json()
+    assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "guest_name" in data["details"]
+    assert not Booking.objects.exists()
+
+
+def test_guest_name_null_da_400(api_client, dueno_user, business, service):
+    inicio = _aware_lima(_manana(), time(10, 0))
+
+    api_client.force_authenticate(user=dueno_user)
+    # format="json": el encoder multipart (default de APIClient acá) no sabe
+    # serializar None, y un null explícito es lo que manda un frontend real.
+    response = api_client.post(
+        URL, _payload(business, service, inicio, guest_name=None), format="json"
+    )
+
+    data = response.json()
+    assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "guest_name" in data["details"]
+    assert not Booking.objects.exists()
+
+
+# --- Mass assignment -----------------------------------------------------
+
+
+def test_customer_del_body_se_ignora_y_no_rompe_el_xor(
+    api_client, dueno_user, cliente_user, business, service
+):
+    # 'customer' no está en Meta.fields, así que DRF lo descarta y create()
+    # fuerza customer=None. Si se colara, quedarían customer Y guest_name
+    # juntos: el otro lado del XOR, o sea otro 500.
+    inicio = _aware_lima(_manana(), time(10, 0))
+
+    api_client.force_authenticate(user=dueno_user)
+    response = api_client.post(
+        URL,
+        _payload(business, service, inicio, extra={"customer": cliente_user.id}),
+    )
+
+    assert response.status_code == 201
+    booking = Booking.objects.get()
+    assert booking.customer is None
+    assert booking.guest_name == "Pedro Tel"
 
 
 # --- Sin grilla ---------------------------------------------------------

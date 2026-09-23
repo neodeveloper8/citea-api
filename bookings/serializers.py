@@ -161,8 +161,21 @@ class DirectBookingSerializer(serializers.ModelSerializer):
         ]
         # NO exponer customer/source/status/end_datetime/price/duration:
         # los pone el backend.
+        extra_kwargs = {
+            # guest_name es blank=True en el modelo porque en una reserva de
+            # marketplace va vacío (ahí el cliente es 'customer'). Pero en una
+            # reserva direct es el ÚNICO identificador del cliente, y la
+            # CheckConstraint booking_customer_xor_guest exige que si
+            # customer es NULL entonces guest_name no esté vacío.
+            # Sin required=True, omitir la clave salteaba validate_guest_name
+            # (los validadores de campo solo corren sobre campos presentes) y
+            # el INSERT violaba la constraint: IntegrityError -> 500.
+            "guest_name": {"required": True, "allow_blank": False},
+        }
 
     def validate_guest_name(self, value):
+        # Sigue siendo necesario: allow_blank=False rechaza "" pero acepta
+        # "   ", que al strippear queda vacío e igual rompería el XOR.
         v = (value or "").strip()
         if not v:
             raise serializers.ValidationError("El nombre del cliente es obligatorio.")

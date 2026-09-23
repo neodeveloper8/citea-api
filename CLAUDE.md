@@ -75,7 +75,11 @@ implementa en Fase 3. NO se usa django-cloudinary-storage ni CloudinaryField.
   }
 ```
   NOTA: `error` es el string del mensaje; `code` y `details` son hermanos al nivel raíz
-  (NO anidados dentro de `error`). Este formato está implementado y cubierto por tests.
+  (NO anidados dentro de `error`).
+  ESTADO REAL: el handler existe y está registrado, pero NO tiene tests directos
+  (core/tests.py solo cubre enviar_email_seguro). La única cobertura es indirecta,
+  vía asserts sobre `code` en tests de endpoints, y el formato todavía no es
+  uniforme: pendiente de saneamiento.
 
 ## Reglas que NO se rompen
 
@@ -105,7 +109,10 @@ implementa en Fase 3. NO se usa django-cloudinary-storage ni CloudinaryField.
 - User hereda de AbstractBaseUser + PermissionsMixin. Login por email. NO usar AbstractUser, NO hay username.
 - Config vía python-decouple + dj-database-url. NO usar django-environ.
 - Settings divididos: config/settings/{base,local,production,test}.py. Default local.
-- test.py usa SQLite en memoria + MD5PasswordHasher + sin throttling (tests rápidos y aislados).
+- test.py usa Postgres 16 en Docker (docker-compose.yml, servicio db-test, puerto 5433,
+  datos en tmpfs) + MD5PasswordHasher + sin throttling. NO es SQLite: hacen falta
+  features de Postgres (ExclusionConstraint con rangos para el solape de reservas).
+  Levantar con `docker compose up -d db-test` antes de correr `pytest`.
 - Driver Postgres: psycopg2-binary. Venv oficial: venv/ (NO .venv/).
 - Permisos: custom permission classes, no decoradores. Ya existen: IsCliente, IsDueno, IsPlatformAdmin, IsOwnerOrReadOnly.
 - IsOwnerOrReadOnly usa owner_field configurable por la view (default "owner"). Recorre la

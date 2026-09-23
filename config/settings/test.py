@@ -1,6 +1,10 @@
 from .base import *  # noqa
 
-# BD en memoria con SQLite: se crea y destruye al instante, no toca Supabase.
+# Postgres en Docker (docker-compose.yml, servicio db-test, puerto 5433).
+# NO es SQLite: los tests necesitan features de Postgres que SQLite no tiene
+# (ExclusionConstraint con rangos para el solape de reservas). Los datos van
+# en tmpfs, así que se crean y destruyen en RAM y no tocan Supabase.
+# Decisión 31.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",

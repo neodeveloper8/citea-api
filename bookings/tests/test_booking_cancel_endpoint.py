@@ -161,7 +161,7 @@ def test_cliente_cancela_booking_en_estado_terminal_devuelve_409(
     response = api_client.post(_cancel_url(booking))
 
     assert response.status_code == 409
-    assert response.json()["code"] == "transicion_no_permitida"
+    assert response.json()["code"] == "invalid_transition"
 
     booking.refresh_from_db()
     assert booking.status == origen

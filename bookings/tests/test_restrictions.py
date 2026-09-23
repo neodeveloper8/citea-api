@@ -206,7 +206,7 @@ def test_endpoint_dos_noshows_recientes_da_403(
     response = api_client.post(URL, _payload(business, service, inicio))
 
     assert response.status_code == 403
-    assert response.json()["code"] == "cliente_restringido"
+    assert response.json()["code"] == "customer_restricted"
     assert not Booking.objects.filter(
         customer=cliente, business=business, status=Booking.Status.PENDING
     ).exists()

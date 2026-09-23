@@ -113,7 +113,7 @@ def test_dueno_completa_booking_en_estado_ilegal_devuelve_409(
     response = api_client.post(_complete_url(booking))
 
     assert response.status_code == 409
-    assert response.json()["code"] == "transicion_no_permitida"
+    assert response.json()["code"] == "invalid_transition"
 
     booking.refresh_from_db()
     assert booking.status == origen
@@ -184,7 +184,7 @@ def test_dueno_marca_no_show_en_estado_ilegal_devuelve_409(
     response = api_client.post(_no_show_url(booking))
 
     assert response.status_code == 409
-    assert response.json()["code"] == "transicion_no_permitida"
+    assert response.json()["code"] == "invalid_transition"
 
     booking.refresh_from_db()
     assert booking.status == origen

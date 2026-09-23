@@ -119,10 +119,10 @@ def test_throttled_sin_wait_deja_details_vacio():
     [
         (ServiceHasBookings(), 409, "service_has_bookings"),
         (SlotJustTaken(), 409, "slot_just_taken"),
-        (TransicionNoPermitida(), 409, "transicion_no_permitida"),
-        (ReviewDuplicada(), 409, "review_duplicada"),
-        (RespuestaDuplicada(), 409, "respuesta_duplicada"),
-        (ClienteRestringido(), 403, "cliente_restringido"),
+        (TransicionNoPermitida(), 409, "invalid_transition"),
+        (ReviewDuplicada(), 409, "duplicate_review"),
+        (RespuestaDuplicada(), 409, "duplicate_response"),
+        (ClienteRestringido(), 403, "customer_restricted"),
     ],
 )
 def test_excepciones_custom_usan_su_default_code(exc, status_esperado, code_esperado):

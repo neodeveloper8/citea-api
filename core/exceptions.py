@@ -38,19 +38,19 @@ class TransicionNoPermitida(APIException):
     default_detail = (
         "La transición solicitada no es válida para el estado actual de la reserva."
     )
-    default_code = "transicion_no_permitida"
+    default_code = "invalid_transition"
 
 
 class ReviewDuplicada(APIException):
     status_code = status.HTTP_409_CONFLICT
     default_detail = "Ya existe una reseña para esta reserva."
-    default_code = "review_duplicada"
+    default_code = "duplicate_review"
 
 
 class RespuestaDuplicada(APIException):
     status_code = status.HTTP_409_CONFLICT
     default_detail = "Esta reseña ya tiene una respuesta."
-    default_code = "respuesta_duplicada"
+    default_code = "duplicate_response"
 
 
 class ClienteRestringido(APIException):
@@ -59,7 +59,7 @@ class ClienteRestringido(APIException):
         "No podés reservar en este negocio: tenés inasistencias "
         "recientes registradas."
     )
-    default_code = "cliente_restringido"
+    default_code = "customer_restricted"
 
 
 def _es_lista_posicional(valor):

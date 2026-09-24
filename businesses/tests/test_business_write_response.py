@@ -1,9 +1,15 @@
-"""El cuerpo de POST/PATCH de Business tiene que ser el mismo que el del GET
-de detalle.
+"""Contrato de ESCRITURA de Business: forma de la respuesta, permisos y
+campos de autoridad.
 
-Si difieren, el frontend necesita dos parsers para el mismo recurso y, peor,
-después de crear o editar no puede pintar la pantalla de detalle con lo que
-recibió: tiene que hacer un GET extra.
+Dos bloques:
+
+- Paridad de cuerpos: POST/PATCH tienen que responder lo mismo que el GET de
+  detalle. Si difieren, el frontend necesita dos parsers para el mismo recurso
+  y, después de crear o editar, un GET extra para pintar el detalle.
+- Permisos y campos de autoridad: quién puede escribir, qué status devuelve
+  cada intento fallido, y qué campos NO puede fijar el cliente aunque los
+  mande (owner, status, slug). DRF los ignora en silencio, así que estos
+  tests verifican en la BD, no en la respuesta.
 """
 
 from datetime import date, datetime, time, timedelta
@@ -41,6 +47,13 @@ def category(db):
 @pytest.fixture
 def otra_category(db):
     return Category.objects.create(name="Barbería Write")
+
+
+@pytest.fixture
+def otro_dueno(db):
+    return User.objects.create_user(
+        email="otro-dueno-write@test.pe", password="ClaveTest123", role=User.Role.DUENO
+    )
 
 
 @pytest.fixture
@@ -169,18 +182,15 @@ def test_post_sin_reviews_devuelve_rating_avg_null(api_client, dueno, category):
 # --- Mass assignment ------------------------------------------------------
 
 
-def test_owner_y_status_del_body_se_ignoran(api_client, dueno, category):
+def test_owner_y_status_del_body_se_ignoran(api_client, dueno, category, otro_dueno):
     # REGRESIÓN: owner lo pone perform_create desde request.user, y status no
     # está en el serializer de escritura, así que usa el default del modelo.
     # Un dueño no puede auto-aprobarse el negocio ni crearlo a nombre de otro.
-    otro = User.objects.create_user(
-        email="otro-write@test.pe", password="x", role=User.Role.DUENO
-    )
     api_client.force_authenticate(user=dueno)
 
     response = api_client.post(
         LIST_URL,
-        _payload(category, owner=otro.id, status=Business.Status.APPROVED),
+        _payload(category, owner=otro_dueno.id, status=Business.Status.APPROVED),
         format="json",
     )
 
@@ -188,3 +198,159 @@ def test_owner_y_status_del_body_se_ignoran(api_client, dueno, category):
     creado = Business.objects.get(slug=response.json()["slug"])
     assert creado.owner == dueno
     assert creado.status == Business.Status.DRAFT
+
+
+# --- POST: permisos -------------------------------------------------------
+
+
+def test_post_sin_autenticar_da_401(api_client, category):
+    response = api_client.post(LIST_URL, _payload(category), format="json")
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "not_authenticated"
+    assert not Business.objects.exists()
+
+
+def test_post_como_cliente_da_403(api_client, cliente_user, category):
+    # IsDueno.has_permission corta en check_permissions(), antes del handler.
+    api_client.force_authenticate(user=cliente_user)
+
+    response = api_client.post(LIST_URL, _payload(category), format="json")
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+    assert not Business.objects.exists()
+
+
+def test_post_con_category_inexistente_da_400(api_client, dueno, category):
+    # _payload toma la category posicional, así que el id inexistente se pisa
+    # después (pasarlo por **extra choca con el parámetro).
+    payload = _payload(category)
+    payload["category"] = category.id + 9999
+
+    api_client.force_authenticate(user=dueno)
+    response = api_client.post(LIST_URL, payload, format="json")
+
+    data = response.json()
+    assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "category" in data["details"]
+    assert not Business.objects.exists()
+
+
+# --- PATCH: permisos ------------------------------------------------------
+
+
+def test_patch_de_otro_dueno_da_404_y_no_modifica_nada(
+    api_client, business, otro_dueno
+):
+    # 404 y NO 403: el queryset de update filtra owner=user, así que para el
+    # dueño ajeno el negocio no existe. Un 403 le confirmaría que el slug
+    # corresponde a un negocio real.
+    original_name = business.name
+    api_client.force_authenticate(user=otro_dueno)
+
+    response = api_client.patch(
+        _detail_url(business.slug), {"name": "Secuestrado"}, format="json"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "not_found"
+    business.refresh_from_db()
+    assert business.name == original_name
+
+
+def test_patch_como_cliente_da_403(api_client, business, cliente_user):
+    # 403 (no 404) porque IsDueno.has_permission corre en check_permissions(),
+    # ANTES del handler: el queryset filtrado por owner nunca llega a
+    # ejecutarse. El rol se rechaza sin mirar de quién es el negocio.
+    original_name = business.name
+    api_client.force_authenticate(user=cliente_user)
+
+    response = api_client.patch(
+        _detail_url(business.slug), {"name": "Secuestrado"}, format="json"
+    )
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+    business.refresh_from_db()
+    assert business.name == original_name
+
+
+def test_patch_sin_autenticar_da_401(api_client, business):
+    original_name = business.name
+
+    response = api_client.patch(
+        _detail_url(business.slug), {"name": "Secuestrado"}, format="json"
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "not_authenticated"
+    business.refresh_from_db()
+    assert business.name == original_name
+
+
+# --- PATCH: campos de autoridad ------------------------------------------
+
+
+def test_patch_de_name_no_cambia_el_slug(api_client, dueno, business):
+    # Decisión 27: el slug se congela al crear. Si siguiera al nombre, cada
+    # rename rompería los links ya compartidos del negocio.
+    slug_original = business.slug
+
+    api_client.force_authenticate(user=dueno)
+    response = api_client.patch(
+        _detail_url(business.slug), {"name": "Salón Con Otro Nombre"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["slug"] == slug_original
+    business.refresh_from_db()
+    assert business.slug == slug_original
+    assert business.name == "Salón Con Otro Nombre"
+
+
+def test_patch_no_permite_fijar_owner_status_ni_slug(
+    api_client, dueno, business, otro_dueno
+):
+    # ATAQUE de mass assignment. DRF descarta los campos que no están en el
+    # serializer SIN avisar, así que la respuesta 200 no prueba nada: hay que
+    # mirar la BD.
+    owner_original = business.owner
+    status_original = business.status
+    slug_original = business.slug
+
+    api_client.force_authenticate(user=dueno)
+    response = api_client.patch(
+        _detail_url(business.slug),
+        {
+            "owner": otro_dueno.id,
+            "status": Business.Status.APPROVED,
+            "slug": "otro-slug",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    business.refresh_from_db()
+    assert business.owner == owner_original
+    assert business.status == status_original
+    assert business.slug == slug_original
+    # Y tampoco se colaron por la respuesta.
+    assert response.json()["slug"] == slug_original
+
+
+# --- DELETE no está expuesto ---------------------------------------------
+
+
+def test_delete_de_negocio_propio_da_405(api_client, dueno, business):
+    # El ViewSet no incluye DestroyModelMixin: el router no mapea DELETE.
+    # Borrar un negocio arrastraría sus reservas (FK CASCADE), así que no se
+    # expone.
+    api_client.force_authenticate(user=dueno)
+
+    response = api_client.delete(_detail_url(business.slug))
+
+    assert response.status_code == 405
+    assert response.json()["code"] == "method_not_allowed"
+    assert Business.objects.filter(pk=business.pk).exists()

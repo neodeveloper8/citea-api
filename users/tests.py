@@ -448,3 +448,66 @@ class TestTokensNoIntercambiables:
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         cliente_user.refresh_from_db()
         assert cliente_user.email_verified is False
+
+
+# ---------- El login actualiza last_login ----------
+
+
+@pytest.mark.django_db
+class TestLoginActualizaLastLogin:
+    def test_login_exitoso_setea_last_login(self, api_client, cliente_user):
+        assert cliente_user.last_login is None
+
+        response = api_client.post(
+            reverse("login"),
+            {"email": cliente_user.email, "password": "ClaveTest123"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        cliente_user.refresh_from_db()
+        assert cliente_user.last_login is not None
+
+    def test_login_no_setea_last_login_si_las_credenciales_fallan(
+        self, api_client, cliente_user
+    ):
+        response = api_client.post(
+            reverse("login"),
+            {"email": cliente_user.email, "password": "ClaveIncorrecta"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        cliente_user.refresh_from_db()
+        assert cliente_user.last_login is None
+
+    def test_reset_pedido_antes_de_un_login_muere_al_loguearse(
+        self, api_client, cliente_user
+    ):
+        # last_login SÍ entra al hash del token de reset (es de Django). Que un
+        # login invalide los resets pendientes es deseable: si alguien pidió un
+        # reset y el dueño real entró con su contraseña, el link queda muerto.
+        from django.contrib.auth.tokens import default_token_generator
+
+        token_reset = default_token_generator.make_token(cliente_user)
+
+        login = api_client.post(
+            reverse("login"),
+            {"email": cliente_user.email, "password": "ClaveTest123"},
+            format="json",
+        )
+        assert login.status_code == status.HTTP_200_OK
+
+        response = api_client.post(
+            reverse("password_reset_confirm"),
+            {
+                "uid": _uid(cliente_user),
+                "token": token_reset,
+                "new_password": "PasswordNuevo456",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        cliente_user.refresh_from_db()
+        assert cliente_user.check_password("PasswordNuevo456") is False

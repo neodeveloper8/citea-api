@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework.permissions import IsAuthenticated
+from django.contrib.auth.signals import user_logged_in
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
@@ -81,6 +82,18 @@ class LoginView(APIView):
         user = serializer.validated_data[
             "user"
         ]  # el user que el serializer validó y guardó en attrs
+
+        # Se emite la SEÑAL en vez de llamar update_last_login(None, user)
+        # directo. Motivo: user_logged_in es el punto de extensión público de
+        # Django para "alguien entró". Django ya le tiene conectado el receptor
+        # que escribe last_login, así que el efecto es el mismo, pero además
+        # corren los demás receptores: los de apps de terceros (auditoría,
+        # 2FA, analítica) y los que agreguemos nosotros más adelante. Llamar al
+        # receptor a mano lo dejaría a él solo y los otros no se enterarían de
+        # este login. authenticate() NO emite esta señal: la emite login(), que
+        # es para sesiones y acá no se usa porque el flujo es JWT.
+        user_logged_in.send(sender=user.__class__, request=request, user=user)
+
         tokens = get_tokens_for_user(user)
 
         return Response(

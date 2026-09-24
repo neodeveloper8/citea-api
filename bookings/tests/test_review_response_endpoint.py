@@ -120,7 +120,7 @@ def test_dueno_ajeno_responde_review_de_otro_negocio_da_400(
 # --- Ya respondida ------------------------------------------------------
 
 
-def test_review_ya_respondida_da_400(api_client, dueno_user, _review):
+def test_review_ya_respondida_da_409(api_client, dueno_user, _review):
     review = _review()
 
     api_client.force_authenticate(user=dueno_user)
@@ -129,7 +129,10 @@ def test_review_ya_respondida_da_400(api_client, dueno_user, _review):
 
     segunda = api_client.post(URL, {"review": review.id, "body": "Otra respuesta"})
 
-    assert segunda.status_code == 400
+    data = segunda.json()
+    assert segunda.status_code == 409
+    assert data["code"] == "duplicate_response"
+    assert data["details"] == {}
     assert ReviewResponse.objects.filter(review=review).count() == 1
 
 
@@ -151,3 +154,65 @@ def test_sin_autenticacion_da_401(api_client, _review):
     response = api_client.post(URL, {"review": review.id, "body": "¡Gracias!"})
 
     assert response.status_code == 401
+
+
+# --- Precedencia: un 409 no puede tapar un 400 ---------------------------
+
+
+def test_respuesta_duplicada_con_body_invalido_da_400_no_409(
+    api_client, dueno_user, _review
+):
+    # ATAQUE: el chequeo de duplicado corre en validate(), o sea DESPUÉS de
+    # la validación de campos. Un body vacío tiene que ganarle al 409.
+    review = _review()
+    ReviewResponse.objects.create(review=review, body="Primera")
+
+    api_client.force_authenticate(user=dueno_user)
+    response = api_client.post(URL, {"review": review.id, "body": ""})
+
+    data = response.json()
+    assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "body" in data["details"]
+
+
+# --- Carrera: el candado del serializer no se entera ---------------------
+
+
+def test_carrera_respuesta_duplicada_da_409(
+    api_client, dueno_user, _review, monkeypatch
+):
+    from bookings.serializers import ReviewResponseCreateSerializer
+
+    review = _review()
+    ReviewResponse.objects.create(review=review, body="Primera")
+    monkeypatch.setattr(
+        ReviewResponseCreateSerializer,
+        "_ya_tiene_respuesta",
+        lambda self, review: False,
+    )
+
+    api_client.force_authenticate(user=dueno_user)
+    response = api_client.post(URL, {"review": review.id, "body": "Segunda"})
+
+    data = response.json()
+    assert response.status_code == 409
+    assert data["code"] == "duplicate_response"
+    assert ReviewResponse.objects.filter(review=review).count() == 1
+
+
+def test_integrity_error_ajeno_no_se_disfraza_de_duplicado(
+    api_client, dueno_user, _review, monkeypatch
+):
+    from bookings.serializers import ReviewResponseCreateSerializer
+
+    review = _review()
+
+    def _explota(self, **kwargs):
+        raise IntegrityError("otra cosa")
+
+    monkeypatch.setattr(ReviewResponseCreateSerializer, "save", _explota)
+
+    api_client.force_authenticate(user=dueno_user)
+    with pytest.raises(IntegrityError, match="otra cosa"):
+        api_client.post(URL, {"review": review.id, "body": "Hola"})

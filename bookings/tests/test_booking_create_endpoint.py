@@ -122,7 +122,7 @@ def test_customer_del_body_se_ignora(
     assert booking.customer_id != dueno_user.id
 
 
-def test_slot_ocupado_da_400(
+def test_slot_ocupado_da_409(
     api_client, cliente_user, business, service, fecha_abierta
 ):
     inicio = _aware_lima(fecha_abierta, time(10, 0))
@@ -141,8 +141,12 @@ def test_slot_ocupado_da_400(
     api_client.force_authenticate(user=cliente_user)
     response = api_client.post(URL, _payload(business, service, inicio))
 
-    assert response.status_code == 400
-    assert response.json()["code"] == "validation_error"
+    # El horario SÍ está en la grilla: el pedido es válido y perdió contra
+    # otra reserva. Mismo status y code que el camino de la carrera.
+    data = response.json()
+    assert response.status_code == 409
+    assert data["code"] == "slot_taken"
+    assert data["details"] == {}
 
 
 def test_service_de_otro_negocio_da_400(
@@ -200,12 +204,18 @@ def test_business_en_draft_da_400(
 def test_horario_fuera_de_grilla_da_400(
     api_client, cliente_user, business, service, fecha_abierta
 ):
+    # 10:07 no cae en ningún paso de 15 min, así que calcular_slots ni lo
+    # emite: es un dato inválido (400), no un conflicto (409). El contraste
+    # con test_slot_ocupado_da_409 es el punto de este test.
     inicio = _aware_lima(fecha_abierta, time(10, 7))
 
     api_client.force_authenticate(user=cliente_user)
     response = api_client.post(URL, _payload(business, service, inicio))
 
+    data = response.json()
     assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "start_datetime" in data["details"]
 
 
 def test_primer_booking_marca_is_first(

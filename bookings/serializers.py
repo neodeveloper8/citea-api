@@ -8,7 +8,12 @@ from businesses.models import Business, Service
 from bookings.availability import calcular_slots
 from bookings.models import Booking, Review, ReviewResponse
 from bookings.restrictions import esta_restringido
-from core.exceptions import ClienteRestringido
+from core.exceptions import (
+    ClienteRestringido,
+    RespuestaDuplicada,
+    ReviewDuplicada,
+    SlotTaken,
+)
 from users.models import User
 
 LIMA_TZ = ZoneInfo("America/Lima")
@@ -105,16 +110,26 @@ class BookingCreateSerializer(serializers.ModelSerializer):
         )
 
         # Comparación exacta (no "cabe dentro de"): el slot elegido debe
-        # calzar con el inicio de un slot disponible tal cual lo devuelve
-        # el motor, para no aceptar horarios arbitrarios entre pasos de 15 min.
-        slot_elegido = next(
-            (s for s in slots if s.disponible and s.inicio == inicio_lima),
-            None,
-        )
+        # calzar con el inicio de un slot tal cual lo devuelve el motor, para
+        # no aceptar horarios arbitrarios entre pasos de 15 min.
+        #
+        # El match se hace SIN mirar 'disponible', porque son dos errores
+        # distintos y el cliente reacciona distinto a cada uno:
+        #   - no está en la grilla  -> el pedido es inválido (400). Cubre
+        #     horarios fuera de paso, fuera de horario de atención, que no
+        #     entran antes del cierre, o ya pasados: calcular_slots ni
+        #     siquiera los emite.
+        #   - está pero ocupado     -> el pedido es válido y perdió la carrera
+        #     contra otra reserva (409). Es el MISMO hecho que atrapa la
+        #     ExclusionConstraint en perform_create, así que va con el mismo
+        #     status y code.
+        slot_elegido = next((s for s in slots if s.inicio == inicio_lima), None)
         if slot_elegido is None:
             raise serializers.ValidationError(
-                {"start_datetime": "Ese horario no está disponible."}
+                {"start_datetime": "Ese horario no es válido para este servicio."}
             )
+        if not slot_elegido.disponible:
+            raise SlotTaken()
 
         attrs["_slot"] = slot_elegido
         return attrs
@@ -281,15 +296,26 @@ class ReviewCreateSerializer(serializers.ModelSerializer):
             )
 
     def validate_booking(self, booking):
+        # Solo la regla que hace al DATO enviado inválido -> 400.
         if booking.status != Booking.Status.COMPLETED:
             raise serializers.ValidationError(
                 "Solo podés reseñar una reserva completada."
             )
-        if Review.objects.filter(booking=booking).exists():
-            raise serializers.ValidationError(
-                "Ya dejaste una reseña para esta reserva."
-            )
         return booking
+
+    def _ya_tiene_review(self, booking):
+        return Review.objects.filter(booking=booking).exists()
+
+    def validate(self, attrs):
+        # La duplicación es un CONFLICTO de estado, no un dato mal formado:
+        # va 409, igual que el camino de la carrera (IntegrityError contra el
+        # OneToOne). Se chequea en validate() y no en validate_booking() para
+        # que corra DESPUÉS de la validación de todos los campos: así un
+        # payload con rating inválido devuelve 400 con el detalle por campo,
+        # y no un 409 que ocultaría el resto de los errores.
+        if self._ya_tiene_review(attrs["booking"]):
+            raise ReviewDuplicada()
+        return attrs
 
 
 class ReviewReadSerializer(serializers.ModelSerializer):
@@ -315,10 +341,18 @@ class ReviewResponseCreateSerializer(serializers.ModelSerializer):
                 booking__business__owner=request.user
             )
 
-    def validate_review(self, review):
-        if ReviewResponse.objects.filter(review=review).exists():
-            raise serializers.ValidationError("Esta reseña ya tiene respuesta.")
-        return review
+    def _ya_tiene_respuesta(self, review):
+        return ReviewResponse.objects.filter(review=review).exists()
+
+    def validate(self, attrs):
+        # Mismo criterio que en ReviewCreateSerializer: conflicto -> 409, y
+        # después de la validación de campos para no tapar un 400.
+        # validate_review() desapareció: el chequeo de existencia era lo único
+        # que hacía (el scopeo por dueño lo da el queryset del campo en
+        # __init__, no un validador).
+        if self._ya_tiene_respuesta(attrs["review"]):
+            raise RespuestaDuplicada()
+        return attrs
 
 
 class ReviewResponseReadSerializer(serializers.ModelSerializer):

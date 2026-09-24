@@ -134,7 +134,7 @@ def test_resenar_booking_ajeno_da_400(api_client, otro_cliente, cliente_user, _b
 # --- Ya reseñado ---------------------------------------------------------
 
 
-def test_resenar_booking_ya_resenado_da_400(api_client, cliente_user, _booking):
+def test_resenar_booking_ya_resenado_da_409(api_client, cliente_user, _booking):
     booking = _booking(Booking.Status.COMPLETED, cliente_user)
 
     api_client.force_authenticate(user=cliente_user)
@@ -143,7 +143,11 @@ def test_resenar_booking_ya_resenado_da_400(api_client, cliente_user, _booking):
 
     segunda = api_client.post(URL, {"booking": booking.id, "rating": 2})
 
-    assert segunda.status_code == 400
+    # Duplicar es un conflicto de estado, no un dato mal formado.
+    data = segunda.json()
+    assert segunda.status_code == 409
+    assert data["code"] == "duplicate_review"
+    assert data["details"] == {}
     assert Review.objects.filter(booking=booking).count() == 1
 
 
@@ -183,3 +187,70 @@ def test_segunda_review_mismo_booking_levanta_integrity_error(cliente_user, _boo
     with pytest.raises(IntegrityError):
         with transaction.atomic():
             Review.objects.create(booking=booking, rating=3, comment="Otra")
+
+
+# --- Precedencia: un 409 no puede tapar un 400 ---------------------------
+
+
+def test_review_duplicada_con_rating_invalido_da_400_no_409(
+    api_client, cliente_user, _booking
+):
+    # ATAQUE: si el chequeo de duplicado corriera antes que la validación de
+    # campos, un payload basura devolvería 409 y el cliente nunca se enteraría
+    # de que además mandó un rating inválido. El 400 tiene que ganar.
+    booking = _booking(Booking.Status.COMPLETED, cliente_user)
+    Review.objects.create(booking=booking, rating=5, comment="Buena")
+
+    api_client.force_authenticate(user=cliente_user)
+    response = api_client.post(URL, {"booking": booking.id, "rating": 9})
+
+    data = response.json()
+    assert response.status_code == 400
+    assert data["code"] == "validation_error"
+    assert "rating" in data["details"]
+
+
+# --- Carrera: el candado del serializer no se entera ---------------------
+
+
+def test_carrera_review_duplicada_da_409(
+    api_client, cliente_user, _booking, monkeypatch
+):
+    # Simulamos la ventana TOCTOU: _ya_tiene_review devuelve False (como si
+    # la otra review se hubiera insertado justo después del chequeo), así que
+    # el 409 solo puede salir del IntegrityError + recheck de la view.
+    from bookings.serializers import ReviewCreateSerializer
+
+    booking = _booking(Booking.Status.COMPLETED, cliente_user)
+    Review.objects.create(booking=booking, rating=5, comment="Buena")
+    monkeypatch.setattr(
+        ReviewCreateSerializer, "_ya_tiene_review", lambda self, booking: False
+    )
+
+    api_client.force_authenticate(user=cliente_user)
+    response = api_client.post(URL, {"booking": booking.id, "rating": 3})
+
+    data = response.json()
+    assert response.status_code == 409
+    assert data["code"] == "duplicate_review"
+    assert Review.objects.filter(booking=booking).count() == 1
+
+
+def test_integrity_error_ajeno_no_se_disfraza_de_duplicado(
+    api_client, cliente_user, _booking, monkeypatch
+):
+    # ATAQUE al except: si capturara cualquier IntegrityError, un bug real
+    # (otra constraint) saldría como 409 "ya existe una reseña" y nadie se
+    # enteraría. Sin review previa, el recheck da False y se re-lanza.
+    from bookings.serializers import ReviewCreateSerializer
+
+    booking = _booking(Booking.Status.COMPLETED, cliente_user)
+
+    def _explota(self, **kwargs):
+        raise IntegrityError("otra cosa")
+
+    monkeypatch.setattr(ReviewCreateSerializer, "save", _explota)
+
+    api_client.force_authenticate(user=cliente_user)
+    with pytest.raises(IntegrityError, match="otra cosa"):
+        api_client.post(URL, {"booking": booking.id, "rating": 3})

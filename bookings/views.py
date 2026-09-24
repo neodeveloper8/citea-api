@@ -234,10 +234,25 @@ class ReviewViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     def create(self, request, *args, **kwargs):
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
+        booking = write.validated_data["booking"]
         try:
-            review = write.save()
+            # El atomic() es obligatorio para el except de abajo: en Postgres
+            # una violación de constraint aborta la transacción entera, y
+            # cualquier consulta posterior muere con TransactionManagementError
+            # ("You can't execute queries until the end of the 'atomic' block").
+            # Envolviendo el save() en su propio bloque, el rollback se limita
+            # a él y la conexión queda usable para hacer el recheck.
+            with transaction.atomic():
+                review = write.save()
         except IntegrityError:
-            raise ReviewDuplicada()
+            # No asumimos QUÉ constraint falló: preguntamos. Si la review
+            # existe, perdimos la carrera contra otro request -> 409. Si no
+            # existe, el IntegrityError es otra cosa (un bug real) y se
+            # re-lanza para que dé 500 en vez de quedar disfrazado de
+            # duplicado.
+            if Review.objects.filter(booking=booking).exists():
+                raise ReviewDuplicada()
+            raise
         read = ReviewReadSerializer(review, context={"request": request})
         return Response(read.data, status=status.HTTP_201_CREATED)
 
@@ -276,9 +291,15 @@ class ReviewResponseViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
     def create(self, request, *args, **kwargs):
         write = self.get_serializer(data=request.data)
         write.is_valid(raise_exception=True)
+        review = write.validated_data["review"]
         try:
-            resp = write.save()
+            # Mismo motivo que en ReviewViewSet: sin este atomic(), el recheck
+            # del except correría sobre una transacción ya abortada.
+            with transaction.atomic():
+                resp = write.save()
         except IntegrityError:
-            raise RespuestaDuplicada()
+            if ReviewResponse.objects.filter(review=review).exists():
+                raise RespuestaDuplicada()
+            raise
         read = ReviewResponseReadSerializer(resp, context={"request": request})
         return Response(read.data, status=status.HTTP_201_CREATED)

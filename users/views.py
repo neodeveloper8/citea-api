@@ -12,6 +12,7 @@ from django.utils.http import urlsafe_base64_encode
 from django.conf import settings
 from core.emails import enviar_email_seguro
 from .models import User
+from .tokens import email_verification_token
 from .serializers import (
     RegisterSerializer,
     LoginSerializer,
@@ -188,7 +189,9 @@ def send_verification_email(user):
     Devuelve el bool de enviar_email_seguro (un mail caído no revienta el flujo,
     pero el caller puede loguear/actuar sobre el resultado si quiere)."""
     uid = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
+    # Generador PROPIO, no default_token_generator: si fuera el mismo que el de
+    # password-reset, este token serviría para cambiar la contraseña.
+    token = email_verification_token.make_token(user)
     verify_link = f"{settings.FRONTEND_URL}/verify-email?uid={uid}&token={token}"
 
     return enviar_email_seguro(

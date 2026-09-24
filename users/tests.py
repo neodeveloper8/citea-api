@@ -298,14 +298,16 @@ class TestPasswordReset:
 class TestEmailVerify:
     def test_verify_marks_email_verified(self, api_client, cliente_user):
         """Verificar con token válido marca email_verified=True."""
-        from django.contrib.auth.tokens import default_token_generator
         from django.utils.encoding import force_bytes
         from django.utils.http import urlsafe_base64_encode
+
+        from users.tokens import email_verification_token
 
         assert cliente_user.email_verified is False  # arranca sin verificar
 
         uid = urlsafe_base64_encode(force_bytes(cliente_user.pk))
-        token = default_token_generator.make_token(cliente_user)
+        # Generador propio de verify, no el de password-reset (ver users/tokens.py).
+        token = email_verification_token.make_token(cliente_user)
 
         response = api_client.post(
             reverse("verify_email"),
@@ -319,3 +321,130 @@ class TestEmailVerify:
 
         cliente_user.refresh_from_db()
         assert cliente_user.email_verified is True
+
+
+# ---------- Los dos tokens no son intercambiables ----------
+
+
+def _uid(user):
+    from django.utils.encoding import force_bytes
+    from django.utils.http import urlsafe_base64_encode
+
+    return urlsafe_base64_encode(force_bytes(user.pk))
+
+
+@pytest.mark.django_db
+class TestTokensNoIntercambiables:
+    """verify y reset tienen que usar generadores DISTINTOS.
+
+    Con un solo generador, un token emitido para confirmar un email sirve para
+    cambiar la contraseña: quien intercepte un mail de bienvenida (o un link
+    reenviado por el propio usuario) se queda con la cuenta.
+    """
+
+    def test_token_de_verify_no_sirve_para_resetear_password(
+        self, api_client, cliente_user
+    ):
+        # ATAQUE. El token del mail de verificación se manda al endpoint de
+        # reset. Tiene que ser rechazado y la contraseña quedar intacta.
+        from users.tokens import email_verification_token
+
+        token_verify = email_verification_token.make_token(cliente_user)
+
+        response = api_client.post(
+            reverse("password_reset_confirm"),
+            {
+                "uid": _uid(cliente_user),
+                "token": token_verify,
+                "new_password": "PasswordRobado789",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["code"] == "validation_error"
+        assert "token" in response.data["details"]
+        cliente_user.refresh_from_db()
+        # Se verifica en la BD: un 400 no probaría por sí solo que no cambió.
+        assert cliente_user.check_password("PasswordRobado789") is False
+        assert cliente_user.check_password("ClaveTest123") is True
+
+    def test_token_de_reset_no_sirve_para_verificar_email(
+        self, api_client, cliente_user
+    ):
+        from django.contrib.auth.tokens import default_token_generator
+
+        token_reset = default_token_generator.make_token(cliente_user)
+
+        response = api_client.post(
+            reverse("verify_email"),
+            {"uid": _uid(cliente_user), "token": token_reset},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        cliente_user.refresh_from_db()
+        assert cliente_user.email_verified is False
+
+    def test_token_de_verify_es_de_un_solo_uso(self, api_client, cliente_user):
+        from users.tokens import email_verification_token
+
+        token = email_verification_token.make_token(cliente_user)
+        url = reverse("verify_email")
+        payload = {"uid": _uid(cliente_user), "token": token}
+
+        primera = api_client.post(url, payload, format="json")
+        assert primera.status_code == status.HTTP_200_OK
+
+        segunda = api_client.post(url, payload, format="json")
+
+        # email_verified entra al hash: al pasar a True el token muere.
+        assert segunda.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_verify_sigue_funcionando_despues_de_un_login(
+        self, api_client, cliente_user
+    ):
+        # CARACTERIZACIÓN: last_login queda FUERA del hash de verificación a
+        # propósito. Loguearse no debe romper un link de verificación pendiente,
+        # y este es justo el flujo normal (register loguea y manda el mail).
+        from users.tokens import email_verification_token
+
+        token = email_verification_token.make_token(cliente_user)
+
+        login = api_client.post(
+            reverse("login"),
+            {"email": cliente_user.email, "password": "ClaveTest123"},
+            format="json",
+        )
+        assert login.status_code == status.HTTP_200_OK
+
+        response = api_client.post(
+            reverse("verify_email"),
+            {"uid": _uid(cliente_user), "token": token},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        cliente_user.refresh_from_db()
+        assert cliente_user.email_verified is True
+
+    def test_cambiar_el_email_invalida_el_token_de_verify(
+        self, api_client, cliente_user
+    ):
+        # El email entra al hash: un link emitido para una dirección no puede
+        # confirmar otra.
+        from users.tokens import email_verification_token
+
+        token = email_verification_token.make_token(cliente_user)
+        cliente_user.email = "otro-email@test.pe"
+        cliente_user.save(update_fields=["email"])
+
+        response = api_client.post(
+            reverse("verify_email"),
+            {"uid": _uid(cliente_user), "token": token},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        cliente_user.refresh_from_db()
+        assert cliente_user.email_verified is False

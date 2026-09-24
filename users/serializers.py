@@ -7,6 +7,8 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 
+from .tokens import email_verification_token
+
 
 class RegisterSerializer(serializers.ModelSerializer):
     # write_only: el password entra pero jamás se serializa de vuelta en una respuesta.
@@ -146,7 +148,9 @@ class EmailVerifyConfirmSerializer(serializers.Serializer):
                 {"token": "El enlace es inválido o expiró."}
             )
 
-        if not default_token_generator.check_token(user, attrs["token"]):
+        # email_verification_token, NO default_token_generator: son generadores
+        # con key_salt distinto, así que un token de reset no valida acá.
+        if not email_verification_token.check_token(user, attrs["token"]):
             raise serializers.ValidationError(
                 {"token": "El enlace es inválido o expiró."}
             )
@@ -156,9 +160,9 @@ class EmailVerifyConfirmSerializer(serializers.Serializer):
 
     def save(self):
         user = self.validated_data["user"]
-        user.email_verified = (
-            True  # el único cambio real: sellar el email como verificado
-        )
+        # Sella el email Y, de paso, mata el token: email_verified entra al
+        # hash del generador, así que al pasar a True el enlace deja de valer.
+        user.email_verified = True
         user.save(update_fields=["email_verified"])
         return user
 

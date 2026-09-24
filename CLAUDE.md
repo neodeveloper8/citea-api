@@ -128,7 +128,14 @@ implementa en Fase 3. NO se usa django-cloudinary-storage ni CloudinaryField.
   ruta al dueño (ej: la view de Service declara owner_field = "business.owner"). YA ajustado.
 - Errores: formato JSON PLANO { "error", "code", "details" } vía core.exceptions.custom_exception_handler.
 - Logout invalida el refresh token vía token_blacklist. El access expira solo (30 min).
-- Reset/verify usan default_token_generator (un solo uso), NO JWT.
+- Reset y verify usan generadores DISTINTOS de PasswordResetTokenGenerator, NO JWT.
+  - password-reset: default_token_generator de Django. Un solo uso, porque set_password
+    cambia user.password y el password entra al hash. Un login lo invalida (last_login
+    también entra al hash), lo cual es deseable.
+  - verify: users.tokens.email_verification_token, generador propio. key_salt distinto,
+    así que su token NO sirve en password-reset ni al revés. Un solo uso porque
+    email_verified entra al hash. last_login y password quedan FUERA a propósito:
+    loguearse o cambiar la contraseña no debe romper una verificación pendiente.
 - Tests: pytest + pytest-django. Correr con `pytest` (usa config.settings.test).
 - El APIClient manda JSON por defecto (TEST_REQUEST_DEFAULT_FORMAT en test.py).
   Solo los uploads declaran format="multipart". Razón: multipart convierte todo

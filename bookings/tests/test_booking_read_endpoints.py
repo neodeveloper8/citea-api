@@ -332,3 +332,143 @@ def test_business_de_otro_dueno_respeta_el_contrato_de_error(api_client, escenar
     assert set(data.keys()) == {"error", "code", "details"}
     # El slug del negocio ajeno no se filtra en el mensaje.
     assert escenario["business"].slug not in data["error"]
+
+
+# --- Filtro de fechas: bordes de zona horaria ----------------------------
+# Las reservas se guardan en UTC, pero date_from/date_to son fechas que el
+# usuario piensa en hora de Lima. Una reserva de las 23:30 de Lima cae al día
+# SIGUIENTE en UTC, así que un filtro que compare contra UTC la dejaría
+# afuera de su propio día. Estos tests fijan la semántica en hora local.
+
+
+@pytest.fixture
+def bordes_tz(escenario):
+    """Reservas en los bordes del día, en hora de Lima.
+
+    fecha_1 23:30 Lima = fecha_2 04:30 UTC (cruza el día en UTC).
+    fecha_2 00:00 Lima = fecha_2 05:00 UTC (primer instante del día local).
+    """
+    tarde = _crear_booking(
+        escenario["cliente_a"],
+        escenario["business"],
+        escenario["service"],
+        _aware_lima(escenario["fecha_1"], time(23, 30)),
+        _aware_lima(escenario["fecha_2"], time(0, 0)),
+        Booking.Status.PENDING,
+    )
+    medianoche = _crear_booking(
+        escenario["cliente_a"],
+        escenario["business"],
+        escenario["service"],
+        _aware_lima(escenario["fecha_2"], time(0, 0)),
+        _aware_lima(escenario["fecha_2"], time(0, 30)),
+        Booking.Status.PENDING,
+    )
+    return {"tarde": tarde, "medianoche": medianoche}
+
+
+# Los dos endpoints que pasan por BookingFilter. export_clients NO lo usa.
+ENDPOINTS = ["me", "business"]
+
+
+def _url_y_actor(nombre, escenario):
+    if nombre == "me":
+        return ME_URL, escenario["cliente_a"]
+    return _business_url(escenario["business"]), escenario["dueno_a"]
+
+
+def _ids_filtrados(api_client, escenario, endpoint, **params):
+    url, actor = _url_y_actor(endpoint, escenario)
+    api_client.force_authenticate(user=actor)
+    response = api_client.get(url, params)
+    assert response.status_code == 200
+    return {b["id"] for b in response.json()["results"]}
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_date_to_incluye_reserva_de_las_2330_del_mismo_dia(
+    api_client, escenario, bordes_tz, endpoint
+):
+    # REGRESIÓN del bug clásico: 23:30 Lima es 04:30 UTC del día siguiente.
+    ids = _ids_filtrados(
+        api_client, escenario, endpoint, date_to=escenario["fecha_1"].isoformat()
+    )
+
+    assert bordes_tz["tarde"].id in ids
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_date_to_del_dia_anterior_excluye_la_de_las_2330(
+    api_client, escenario, bordes_tz, endpoint
+):
+    ayer = escenario["fecha_1"] - timedelta(days=1)
+
+    ids = _ids_filtrados(api_client, escenario, endpoint, date_to=ayer.isoformat())
+
+    assert bordes_tz["tarde"].id not in ids
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_date_from_del_dia_siguiente_excluye_la_de_las_2330(
+    api_client, escenario, bordes_tz, endpoint
+):
+    ids = _ids_filtrados(
+        api_client, escenario, endpoint, date_from=escenario["fecha_2"].isoformat()
+    )
+
+    assert bordes_tz["tarde"].id not in ids
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_date_from_del_mismo_dia_incluye_la_de_las_2330(
+    api_client, escenario, bordes_tz, endpoint
+):
+    ids = _ids_filtrados(
+        api_client, escenario, endpoint, date_from=escenario["fecha_1"].isoformat()
+    )
+
+    assert bordes_tz["tarde"].id in ids
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_medianoche_local_pertenece_a_su_propio_dia(
+    api_client, escenario, bordes_tz, endpoint
+):
+    # 00:00 de fecha_2 es el PRIMER instante de fecha_2: no puede contar
+    # como fecha_1 (el límite inferior tiene que ser inclusivo).
+    ids_dia_previo = _ids_filtrados(
+        api_client, escenario, endpoint, date_to=escenario["fecha_1"].isoformat()
+    )
+    ids_su_dia = _ids_filtrados(
+        api_client, escenario, endpoint, date_from=escenario["fecha_2"].isoformat()
+    )
+
+    assert bordes_tz["medianoche"].id not in ids_dia_previo
+    assert bordes_tz["medianoche"].id in ids_su_dia
+
+
+def test_date_from_igual_date_to_devuelve_solo_ese_dia(api_client, escenario):
+    # escenario tiene reservas de cliente_a en fecha_1 (a1), fecha_2 (a2) y
+    # fecha_5 (a3): hay días antes y después del pedido.
+    ids = _ids_filtrados(
+        api_client,
+        escenario,
+        "me",
+        date_from=escenario["fecha_2"].isoformat(),
+        date_to=escenario["fecha_2"].isoformat(),
+    )
+
+    assert ids == {escenario["a2"].id}
+
+
+def test_rango_invertido_devuelve_vacio_sin_error(api_client, escenario):
+    # date_from > date_to no es un error de validación: es un rango vacío.
+    ids = _ids_filtrados(
+        api_client,
+        escenario,
+        "me",
+        date_from=escenario["fecha_5"].isoformat(),
+        date_to=escenario["fecha_1"].isoformat(),
+    )
+
+    assert ids == set()

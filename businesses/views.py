@@ -8,7 +8,7 @@ from django.db.models import Avg, Count, Prefetch, Q
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -96,23 +96,7 @@ class BusinessViewSet(
 
         # Detalle: los aprobados + los propios (para que el dueño vea su draft).
         if self.action == "retrieve":
-            visible = Q(status=Business.Status.APPROVED)
-            if user.is_authenticated:
-                visible |= Q(owner=user)
-            return (
-                qs.filter(visible)
-                .annotate(
-                    rating_avg_ann=Avg("bookings__review__rating"),
-                    rating_count_ann=Count("bookings__review", distinct=True),
-                )
-                .prefetch_related(
-                    Prefetch(
-                        "services", queryset=Service.objects.filter(is_active=True)
-                    ),
-                    "hours",
-                    "images",
-                )
-            )
+            return self._queryset_detalle()
 
         # list (público): solo aprobados, con portada prefetcheada.
         return qs.filter(status=Business.Status.APPROVED).prefetch_related(
@@ -122,6 +106,71 @@ class BusinessViewSet(
                 to_attr="cover",
             )
         )
+
+    def _queryset_detalle(self):
+        """Queryset con todo lo que BusinessDetailSerializer necesita.
+
+        Vive aparte de get_queryset porque lo usan DOS caminos: el retrieve y
+        la respuesta de create/update. Visibilidad: los aprobados + los
+        propios, para que el dueño vea su draft.
+        """
+        visible = Q(status=Business.Status.APPROVED)
+        if self.request.user.is_authenticated:
+            visible |= Q(owner=self.request.user)
+        return (
+            Business.objects.select_related("category")
+            .filter(visible)
+            .annotate(
+                rating_avg_ann=Avg("bookings__review__rating"),
+                rating_count_ann=Count("bookings__review", distinct=True),
+            )
+            .prefetch_related(
+                Prefetch("services", queryset=Service.objects.filter(is_active=True)),
+                "hours",
+                "images",
+            )
+        )
+
+    def _cuerpo_detalle(self, instance):
+        """Serializa `instance` con el MISMO cuerpo que devuelve el GET de detalle.
+
+        POR QUÉ SE RELEE en vez de serializar la instancia que devolvió save():
+        BusinessDetailSerializer depende de cosas que solo existen en
+        _queryset_detalle() — las anotaciones rating_avg_ann / rating_count_ann
+        y los prefetch (services filtrado por is_active, hours, images). La
+        instancia que sale de save() no las trae.
+        Y no fallaría de forma visible: get_rating_avg y get_rating_count leen
+        con getattr(..., default), así que devolverían null y 0 en silencio
+        aunque el negocio tenga reseñas. Un error sería preferible a ese dato
+        incorrecto; releer evita las dos cosas.
+        """
+        fresca = self._queryset_detalle().get(pk=instance.pk)
+        return BusinessDetailSerializer(
+            fresca, context=self.get_serializer_context()
+        ).data
+
+    def create(self, request, *args, **kwargs):
+        # Se escribe con BusinessWriteSerializer y se RESPONDE con el de
+        # detalle: así el frontend puede pintar la pantalla de detalle con lo
+        # que recibió, sin un GET extra ni un segundo parser para el mismo
+        # recurso.
+        write = self.get_serializer(data=request.data)
+        write.is_valid(raise_exception=True)
+        self.perform_create(write)
+        return Response(
+            self._cuerpo_detalle(write.instance),
+            status=status.HTTP_201_CREATED,
+            headers=self.get_success_headers(write.data),
+        )
+
+    def update(self, request, *args, **kwargs):
+        # partial_update delega acá con partial=True, así que cubre PUT y PATCH.
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write = self.get_serializer(instance, data=request.data, partial=partial)
+        write.is_valid(raise_exception=True)
+        self.perform_update(write)
+        return Response(self._cuerpo_detalle(instance), status=status.HTTP_200_OK)
 
     def perform_create(self, serializer):
         # El owner NUNCA viene del cliente: lo pone el backend.

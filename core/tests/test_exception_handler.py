@@ -17,7 +17,7 @@ from core.exceptions import (
     RespuestaDuplicada,
     ReviewDuplicada,
     ServiceHasBookings,
-    SlotJustTaken,
+    SlotTaken,
     TransicionNoPermitida,
     custom_exception_handler,
 )
@@ -118,7 +118,7 @@ def test_throttled_sin_wait_deja_details_vacio():
     "exc, status_esperado, code_esperado",
     [
         (ServiceHasBookings(), 409, "service_has_bookings"),
-        (SlotJustTaken(), 409, "slot_just_taken"),
+        (SlotTaken(), 409, "slot_taken"),
         (TransicionNoPermitida(), 409, "invalid_transition"),
         (ReviewDuplicada(), 409, "duplicate_review"),
         (RespuestaDuplicada(), 409, "duplicate_response"),
@@ -133,15 +133,15 @@ def test_excepciones_custom_usan_su_default_code(exc, status_esperado, code_espe
 
 
 def test_custom_con_code_explicito_gana_sobre_el_default():
-    response = manejar(SlotJustTaken(code="otro"))
+    response = manejar(SlotTaken(code="otro"))
 
     assert response.data["code"] == "otro"
 
 
 def test_custom_usa_su_default_detail_como_error():
-    response = manejar(SlotJustTaken())
+    response = manejar(SlotTaken())
 
-    assert response.data["error"] == SlotJustTaken.default_detail
+    assert response.data["error"] == SlotTaken.default_detail
 
 
 # --------------------------------------------------------------------------
@@ -247,8 +247,8 @@ CASOS_CON_RESPUESTA = [
     exceptions.Throttled(wait=30),
     exceptions.Throttled(),
     ServiceHasBookings(),
-    SlotJustTaken(),
-    SlotJustTaken(code="otro"),
+    SlotTaken(),
+    SlotTaken(code="otro"),
     TransicionNoPermitida(),
     ReviewDuplicada(),
     RespuestaDuplicada(),

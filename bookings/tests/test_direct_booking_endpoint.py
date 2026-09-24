@@ -219,7 +219,7 @@ def test_solape_entre_dos_direct_da_409(api_client, dueno_user, business, servic
     )
 
     assert segunda.status_code == 409
-    assert segunda.json()["code"] == "slot_just_taken"
+    assert segunda.json()["code"] == "slot_taken"
 
 
 def test_solape_contra_booking_marketplace_da_409(
@@ -242,7 +242,7 @@ def test_solape_contra_booking_marketplace_da_409(
     response = api_client.post(URL, _payload(business, service, inicio))
 
     assert response.status_code == 409
-    assert response.json()["code"] == "slot_just_taken"
+    assert response.json()["code"] == "slot_taken"
 
 
 # --- Ownership -----------------------------------------------------------

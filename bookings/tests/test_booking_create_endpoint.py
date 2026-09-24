@@ -255,4 +255,4 @@ def test_race_condition_devuelve_409(
     response = api_client.post(URL, _payload(business, service, inicio))
 
     assert response.status_code == 409
-    assert response.json()["code"] == "slot_just_taken"
+    assert response.json()["code"] == "slot_taken"

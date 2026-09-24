@@ -24,13 +24,16 @@ class ServiceHasBookings(APIException):
     default_code = "service_has_bookings"
 
 
-class SlotJustTaken(APIException):
+class SlotTaken(APIException):
+    # Se llama SlotTaken y no SlotJustTaken porque ya no cubre solo la carrera
+    # ("acaba de"): también es la respuesta cuando el horario estaba ocupado
+    # desde antes del request. Un conflicto es 409 venga por donde venga.
     status_code = status.HTTP_409_CONFLICT
     default_detail = (
-        "Ese horario acaba de ser reservado por otra persona. "
-        "Actualizá la disponibilidad e intentá de nuevo."
+        "Ese horario ya no está disponible. "
+        "Actualizá la disponibilidad e intentá con otro."
     )
-    default_code = "slot_just_taken"
+    default_code = "slot_taken"
 
 
 class TransicionNoPermitida(APIException):
@@ -188,7 +191,7 @@ def custom_exception_handler(exc, context):
         error_message = _mensaje_de_validacion(details)
     else:
         # exc.detail.code respeta un code= pasado a la instancia
-        # (SlotJustTaken(code="otro")); default_code es el de la clase.
+        # (SlotTaken(code="otro")); default_code es el de la clase.
         code = getattr(detalle, "code", None) or getattr(exc, "default_code", "error")
         if isinstance(detalle, str):
             error_message = str(detalle)

@@ -15,7 +15,7 @@ from businesses.models import Business
 from core.exceptions import (
     ReviewDuplicada,
     RespuestaDuplicada,
-    SlotJustTaken,
+    SlotTaken,
     TransicionNoPermitida,
 )
 from users.permissions import IsDueno, PuedeCancelarBooking
@@ -106,7 +106,7 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
             # Solo traducimos a 409 el solape. Otros IntegrityError son
             # bugs reales y deben propagarse (500), no esconderse.
             if "excluir_reservas_solapadas" in str(exc):
-                raise SlotJustTaken()
+                raise SlotTaken()
             raise
 
     def _transicionar_como_dueno(self, request, pk, *, metodo, email_fn=None):
@@ -220,7 +220,7 @@ class BookingViewSet(mixins.CreateModelMixin, viewsets.GenericViewSet):
                 booking = write.save()
         except IntegrityError as exc:
             if "excluir_reservas_solapadas" in str(exc):
-                raise SlotJustTaken()
+                raise SlotTaken()
             raise
         read = BookingReadSerializer(booking, context={"request": request})
         return Response(read.data, status=status.HTTP_201_CREATED)
